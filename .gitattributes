@@ -1,0 +1,6 @@
+# Script shell PHẢI giữ xuống dòng LF, không thì chạy trên macOS/Linux báo
+# "bad interpreter: /usr/bin/env bash^M".
+*.sh text eol=lf
+*.yml text eol=lf
+# Batch của Windows thì ngược lại.
+*.bat text eol=crlf

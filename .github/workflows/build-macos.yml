@@ -1,0 +1,76 @@
+name: Build macOS app
+
+# Chạy thủ công trong tab Actions (Run workflow), hoặc khi đẩy tag v*.
+on:
+  workflow_dispatch:
+    inputs:
+      bundle_chromium:
+        description: "Nhúng luôn Chromium (+~300MB) — chỉ cần khi máy Mac đích KHÔNG có Chrome/Edge"
+        type: boolean
+        default: false
+  push:
+    tags: ["v*"]
+
+jobs:
+  build:
+    name: Build ${{ matrix.arch }} (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false            # 1 kiến trúc lỗi/chờ lâu KHÔNG huỷ cái kia
+      matrix:
+        include:
+          - runner: macos-14      # Apple Silicon (M1/M2/M3…) -> app arm64
+            arch: arm64
+          - runner: macos-13      # Intel x86_64 -> app cho Mac Intel
+            arch: intel
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build .app (ffmpeg static đúng kiến trúc runner)
+        env:
+          BUNDLE_CHROMIUM: ${{ inputs.bundle_chromium && '1' || '0' }}
+        run: bash build_mac.sh
+
+      - name: Smoke test — app THẬT khởi động được
+        run: |
+          BIN="dist/TNT_Downloader.app/Contents/MacOS/TNT_Downloader"
+          export QT_QPA_PLATFORM=offscreen
+          rm -f dist/machine_id.txt
+          # Không có license.key -> app ghi machine_id.txt RỒI hiện dialog. Có file
+          # đó nghĩa là app chạy tới bước license = PySide6/cryptography gói đúng.
+          # macOS không có lệnh 'timeout' -> chạy nền rồi tự kill.
+          "$BIN" > smoke.log 2>&1 &
+          PID=$!
+          for i in $(seq 1 90); do
+            [ -f dist/machine_id.txt ] && break
+            kill -0 "$PID" 2>/dev/null || break
+            sleep 1
+          done
+          kill "$PID" 2>/dev/null || true
+          wait "$PID" 2>/dev/null || true
+          echo "----- app output -----"; cat smoke.log || true; echo "----------------------"
+          if grep -qi "No module named" smoke.log; then
+            echo "❌ Thiếu module trong bundle (xem log trên)."; exit 1
+          fi
+          if [ ! -f dist/machine_id.txt ]; then
+            echo "❌ App KHÔNG khởi động được tới bước license."; exit 1
+          fi
+          echo "✅ App khởi động OK. Mã máy của runner:"; cat dist/machine_id.txt
+          rm -f dist/machine_id.txt
+
+      - name: Kiểm tra ffmpeg nhúng chạy đúng kiến trúc
+        run: |
+          FF="dist/TNT_Downloader.app/Contents/Frameworks/ffmpeg/ffmpeg"
+          file "$FF"
+          "$FF" -version | head -1
+
+      - name: Tải kết quả lên (artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: TNT_Downloader-mac-${{ matrix.arch }}
+          path: dist/TNT_Downloader-mac.zip
+          if-no-files-found: error

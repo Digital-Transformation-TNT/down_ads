@@ -1,0 +1,17 @@
+# ───────────────────────── Giao diện ─────────────────────────
+PySide6>=6.6
+
+# ─────────────────────── Bảo mật license ─────────────────────
+cryptography>=42        # tnt_license.py: kiểm chữ ký Ed25519 của license.key
+
+# ─────────────────────── Tải video ───────────────────────────
+yt-dlp>=2026.7.4        # bộ tải đa nguồn. Site đổi liên tục -> chạy `pip install -U yt-dlp` định kỳ
+curl_cffi>=0.11         # giả lập TLS trình duyệt cho yt-dlp (TikTok/Douyin bắt buộc).
+                        # GHIM >=0.11: bản cũ thiếu target 'chrome'
+requests>=2.31          # các nguồn phụ: tikwm / ssstik / quét trang / link CDN thẳng
+imageio-ffmpeg>=0.4.9   # có sẵn ffmpeg nếu máy chưa cài (dùng để ghép/remux/HLS)
+
+# ────────────── Bắt luồng bằng trình duyệt (video quảng cáo) ──────────────
+# Không bắt buộc, nhưng THIẾU thì không tải được các link quảng cáo phải đăng nhập.
+# Sau khi cài nhớ chạy:  python -m playwright install chromium
+playwright>=1.40

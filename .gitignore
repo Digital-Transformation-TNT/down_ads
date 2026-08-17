@@ -1,0 +1,29 @@
+# ── KHÔNG bao giờ đẩy lên git ──
+# (chú thích phải ở dòng riêng — để cùng dòng với pattern là git coi luôn phần
+#  chú thích là một phần của tên file, xem như không có luật gì cả)
+
+# license gắn theo TỪNG máy, cấp riêng cho mỗi người dùng
+license.key
+# mã máy do lớp license tự ghi ra khi chạy
+machine_id.txt
+# khoá ký license (nằm ở tnt_license_kit, phòng khi copy nhầm)
+*.pem
+
+# ── Sản phẩm build ──
+build/
+dist/
+# ffmpeg static tải về lúc build (mỗi hệ 1 bản, ~100MB)
+vendor/
+
+# ── Môi trường / rác Python ──
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# ── Hệ điều hành / IDE ──
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
