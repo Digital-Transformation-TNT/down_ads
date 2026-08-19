@@ -8,9 +8,10 @@ Có 3 nguồn cookies, xếp theo mức tin cậy:
 
 1. File cookies.txt tự chọn        — luôn chạy được (xuất bằng extension
                                       "Get cookies.txt LOCALLY").
-2. Hồ sơ trình duyệt TNT ("tnt")   — Chromium do app mở, người dùng đăng nhập
-                                      1 lần. LUÔN đọc được vì là profile của
-                                      chính mình. Cần Playwright.
+2. Hồ sơ trình duyệt TNT ("tnt")   — trình duyệt do app mở, người dùng đăng nhập
+                                      1 lần. LUÔN đọc được vì là hồ sơ của chính
+                                      mình. Việc ĐỌC cookies không mở trình duyệt
+                                      (đọc thẳng SQLite), chỉ lúc đăng nhập mới mở.
 3. Chrome/Edge/Firefox trên máy    — tiện nhất nhưng CHROME/EDGE TRÊN WINDOWS
                                       MỚI THƯỜNG THẤT BẠI: từ Chrome 127 cookies
                                       được mã hoá App-Bound Encryption, tiến
@@ -26,7 +27,7 @@ import os
 import tempfile
 import time
 
-from .utils import BROWSER_PROFILE_DIR, launch_persistent
+from .utils import BROWSER_PROFILE_DIR
 
 # Trình duyệt hệ thống mà yt-dlp đọc được cookies.
 SUPPORTED = ["chrome", "edge", "firefox", "brave", "opera", "vivaldi", "chromium"]
@@ -70,34 +71,18 @@ def cookiejar(browser: str):
     return jar
 
 
-# ───────────────── 2. cookies từ hồ sơ Chromium riêng của app ─────────────────
-def _write_netscape(cookies: list[dict], path: str) -> int:
-    """Ghi list cookie kiểu Playwright ra file cookies.txt (định dạng Netscape)."""
-    n = 0
-    with open(path, "w", encoding="utf-8") as f:
-        f.write("# Netscape HTTP Cookie File\n")
-        for c in cookies:
-            dom = c.get("domain") or ""
-            if not dom or not c.get("name"):
-                continue
-            expires = int(c.get("expires") or 0)
-            if expires <= 0:                     # cookie phiên -> cho hạn xa để yt-dlp giữ lại
-                expires = int(time.time()) + 86400 * 7
-            f.write("\t".join([
-                dom, "TRUE" if dom.startswith(".") else "FALSE",
-                c.get("path") or "/", "TRUE" if c.get("secure") else "FALSE",
-                str(expires), c["name"], c.get("value") or "",
-            ]) + "\n")
-            n += 1
-    return n
-
-
+# ───────────────── 2. cookies từ hồ sơ trình duyệt riêng của app ─────────────────
 def tnt_profile_cookiefile() -> str | None:
-    """Xuất cookies từ hồ sơ Chromium của app ra cookies.txt.
+    """Xuất cookies từ hồ sơ trình duyệt của app ra cookies.txt — KHÔNG mở trình duyệt.
 
-    Đây là cách CHẮC ĂN trên Windows đời mới: profile do chính app tạo nên không
-    dính App-Bound Encryption. Người dùng bấm “Mở trình duyệt để đăng nhập” một
-    lần là dùng được mãi.
+    Đọc THẲNG file SQLite `Cookies` trong hồ sơ (giống cách yt-dlp đọc Chrome/Edge
+    hệ thống, chỉ khác là trỏ vào hồ sơ riêng của app). Trước đây hàm này bật một
+    phiên Chromium headless để lấy cookies — tải hàng trăm link thì Chrome cứ bật
+    lên liên tục, chiếm máy người dùng.
+
+    Hồ sơ do chính app tạo nên giải mã được, không dính App-Bound Encryption như
+    hồ sơ Chrome/Edge hệ thống. Trên macOS lần đầu có thể hiện hộp Keychain xin
+    quyền — bấm Always Allow là xong, các lần sau im lặng.
     """
     global _LAST_ERROR
     if not os.path.isdir(BROWSER_PROFILE_DIR):
@@ -107,22 +92,56 @@ def tnt_profile_cookiefile() -> str | None:
     hit = _FILE_CACHE.get(TNT_PROFILE)
     if hit and os.path.exists(hit[0]) and (time.time() - hit[1]) < _FILE_TTL:
         return hit[0]
-    try:
-        from playwright.sync_api import sync_playwright  # type: ignore
-        with sync_playwright() as p:
-            ctx = launch_persistent(p, BROWSER_PROFILE_DIR, headless=True)
-            cks = ctx.cookies()
-            ctx.close()
-    except Exception as e:
-        _LAST_ERROR = f"Không đọc được hồ sơ trình duyệt TNT: {str(e)[:160]}"
-        return None
-    path = os.path.join(tempfile.gettempdir(), "tnt_dl_cookies_profile.txt")
-    if _write_netscape(cks or [], path) == 0:
+    if not _profile_cookie_db():
         _LAST_ERROR = ("Hồ sơ trình duyệt TNT chưa có cookies — hãy đăng nhập TikTok/Douyin "
                        "trong cửa sổ trình duyệt của app rồi thử lại.")
         return None
+
+    jar = None
+    err = ""
+    empty = False
+    # Hồ sơ có thể do Edge, Chrome hoặc Chromium tạo (tuỳ máy có gì) — thử lần lượt,
+    # khác nhau ở chỗ lấy khoá giải mã (Keychain/DPAPI) theo tên trình duyệt.
+    for name in ("chrome", "edge", "chromium"):
+        try:
+            from yt_dlp.cookies import extract_cookies_from_browser  # type: ignore
+            j = extract_cookies_from_browser(name, profile=BROWSER_PROFILE_DIR)
+            if j is not None and len(j):
+                jar = j
+                break
+            empty = True          # đọc được nhưng hồ sơ chưa có cookie nào
+        except Exception as e:
+            err = str(e)[:160]
+    if jar is None:
+        _LAST_ERROR = (
+            "Hồ sơ trình duyệt TNT chưa có cookies — bấm “Mở trình duyệt để đăng nhập”, "
+            "đăng nhập TikTok/Douyin rồi đóng cửa sổ."
+            if empty else
+            f"Không đọc được cookies từ hồ sơ trình duyệt TNT ({err}). "
+            "Đăng nhập lại, hoặc dùng file cookies.txt.")
+        return None
+
+    path = os.path.join(tempfile.gettempdir(), "tnt_dl_cookies_profile.txt")
+    try:
+        jar.save(path)
+    except Exception:
+        try:
+            jar.save(path, ignore_discard=True, ignore_expires=True)  # type: ignore
+        except Exception as e:
+            _LAST_ERROR = f"Không ghi được file cookies: {str(e)[:120]}"
+            return None
     _FILE_CACHE[TNT_PROFILE] = (path, time.time())
     return path
+
+
+def _profile_cookie_db() -> str:
+    """Đường dẫn file SQLite `Cookies` trong hồ sơ TNT (rỗng nếu chưa đăng nhập lần nào)."""
+    for rel in (("Default", "Network", "Cookies"), ("Default", "Cookies"),
+                ("Network", "Cookies"), ("Cookies",)):
+        p = os.path.join(BROWSER_PROFILE_DIR, *rel)
+        if os.path.isfile(p) and os.path.getsize(p) > 0:
+            return p
+    return ""
 
 
 # ──────────────────────────── điểm vào chung ────────────────────────────

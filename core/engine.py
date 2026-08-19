@@ -4,16 +4,21 @@ Khác biệt so với bản chạy trên server (Hugging Face Space):
 1. KHÔNG cần relay/proxy: máy người dùng có IP dân dụng, gọi thẳng nguồn nào cũng được.
 2. Mượn COOKIES trình duyệt trên máy -> tải được video riêng tư / quảng cáo mà
    server không bao giờ thấy.
-3. Có nước cờ cuối "mở trình duyệt thật rồi bắt luồng" (sniffer) cho link quảng cáo.
-4. Tải SONG SONG nhiều link (bản web chạy tuần tự từng link).
-5. Chọn chất lượng / chỉ lấy MP3 / đặt thẳng thư mục lưu.
+3. Tải SONG SONG nhiều link (bản web chạy tuần tự từng link).
+4. Đặt thẳng thư mục lưu, luôn lấy chất lượng gốc.
+
+MẶC ĐỊNH CHỈ CHẠY BẰNG API — KHÔNG mở trình duyệt. Toàn bộ chuỗi dưới đây là gọi
+HTTP thuần (kèm cookies đã đăng nhập nếu có), nên tải hàng trăm link vẫn im lặng,
+người dùng làm việc khác bình thường. Chế độ mở trình duyệt để bắt luồng chỉ chạy
+khi người dùng tự bật (`browser_fallback`) — dùng cho vài link khó còn sót lại.
 
 Thứ tự thử nguồn (dừng ở nguồn đầu tiên ra được video thật):
   link .mp4 thẳng   → tải luôn
-  douyin            → iesdouyin → yt-dlp → quét trang → trình duyệt
-  tiktok            → yt-dlp → tikwm → ssstik → trình duyệt
-  trang quảng cáo   → quét trang → trình duyệt → yt-dlp generic
-  còn lại           → yt-dlp → yt-dlp "best" → generic → quét trang → trình duyệt
+  douyin            → iesdouyin → yt-dlp → quét trang
+  tiktok            → yt-dlp → API tiktok (cookies) → tikwm → ssstik
+  trang quảng cáo   → quét trang → API tiktok → yt-dlp generic
+  còn lại           → yt-dlp → yt-dlp "best" → generic → quét trang
+  (+ "trình duyệt bắt luồng" nối vào cuối mọi chuỗi NẾU người dùng bật)
 """
 
 from __future__ import annotations
@@ -41,7 +46,10 @@ class Options:
     out_dir: str = ""
     browser: str = ""            # tnt | chrome | edge | firefox | ... ('' = không cookies)
     concurrency: int = 3
-    browser_fallback: bool = True     # bật nước cờ cuối (Playwright) cho link khó
+    # MẶC ĐỊNH TẮT: mở trình duyệt cho từng link lỗi khiến tải hàng trăm video là
+    # Chrome bật lên liên tục, người dùng không làm được việc khác. Bật thủ công
+    # (hoặc dùng nút 'Thử lại link lỗi bằng trình duyệt') khi thật sự cần.
+    browser_fallback: bool = False
     headless: bool = False            # cửa sổ hiện ra để người dùng đăng nhập/bấm play
     cookies_file: str = ""            # file cookies.txt tự chọn (ưu tiên hơn `browser`)
 
@@ -314,12 +322,14 @@ def download_one(url: str, opts: Options, on_progress=None, on_log=None) -> Resu
     elif source == "tiktok":
         steps += [
             ("yt-dlp", lambda: _ydl_attempt(url, opts, source, on_progress=on_progress)),
+            ("API tiktok", lambda: ex.tiktok_web_api(url, opts.out_dir, sess, on_progress)),
             ("tikwm", lambda: ex.tikwm(url, opts.out_dir, sess_m, on_progress)),
             ("ssstik", lambda: ex.ssstik(url, opts.out_dir, sess, on_progress)),
         ]
     elif source == "ads":
         steps += [
             ("quét trang quảng cáo", lambda: ex.scrape_page(url, opts.out_dir, sess, on_progress)),
+            ("API tiktok", lambda: ex.tiktok_web_api(url, opts.out_dir, sess, on_progress)),
             ("yt-dlp generic", lambda: _ydl_attempt(url, opts, source, generic=True,
                                                     on_progress=on_progress)),
         ]
@@ -365,6 +375,9 @@ def download_one(url: str, opts: Options, on_progress=None, on_log=None) -> Resu
         elif not opts.browser:
             hint = (" | Mẹo: chọn nguồn Cookies (trình duyệt đang đăng nhập TikTok/Douyin) "
                     "rồi tải lại — video quảng cáo cần phiên đăng nhập.")
+        elif not opts.browser_fallback:
+            hint = (" | Còn một nước nữa: chọn các dòng lỗi rồi bấm “Thử lại bằng trình "
+                    "duyệt” (mở cửa sổ, chỉ chạy cho những link này).")
         elif not sniffer.available():
             hint = (" | Mẹo: cài Playwright để bật chế độ bắt luồng bằng trình duyệt: "
                     "pip install playwright && python -m playwright install chromium")

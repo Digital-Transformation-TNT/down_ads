@@ -46,8 +46,9 @@ def main() -> int:
     ap.add_argument("--browser", default="",
                     help="nguồn cookies: tnt (hồ sơ trình duyệt của app) | chrome|edge|firefox|brave…")
     ap.add_argument("--cookies", default="", help="file cookies.txt (ưu tiên hơn --browser)")
-    ap.add_argument("--no-browser-fallback", action="store_true",
-                    help="tắt chế độ bắt luồng bằng trình duyệt")
+    ap.add_argument("--browser-fallback", action="store_true",
+                    help="cho phép mở trình duyệt bắt luồng khi mọi nguồn API thất bại "
+                         "(mặc định TẮT — chạy im lặng, không chiếm máy)")
     ap.add_argument("--headless", action="store_true", help="ẩn cửa sổ trình duyệt khi bắt luồng")
     a = ap.parse_args()
 
@@ -64,7 +65,7 @@ def main() -> int:
         return 1
 
     opts = Options(out_dir=a.out, browser=a.browser, concurrency=a.jobs,
-                   browser_fallback=not a.no_browser_fallback, headless=a.headless,
+                   browser_fallback=a.browser_fallback, headless=a.headless,
                    cookies_file=a.cookies)
     os.makedirs(a.out, exist_ok=True)
     print(f"Tải {len(urls)} link → {a.out}")

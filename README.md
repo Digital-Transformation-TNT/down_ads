@@ -34,6 +34,8 @@ cả Edge lẫn Chrome). Ép một trình duyệt cụ thể bằng biến `TNT_
 1. Dán danh sách link (mỗi dòng 1 link) → **Phân tích link**.
 2. Chọn thư mục lưu và số link tải song song. Video luôn tải ở **chất lượng gốc** như trên link.
 3. Muốn tải **video quảng cáo / video riêng tư** thì phải có phiên đăng nhập — xem mục 3.
+   Mặc định app **chỉ chạy bằng API, không mở trình duyệt** — tải hàng trăm link vẫn
+   im lặng, máy dùng việc khác bình thường.
 4. **BẮT ĐẦU TẢI**. Nhấp đúp một dòng đã xong để mở thư mục chứa file.
 
 Chạy dòng lệnh (tự động hoá):
@@ -69,23 +71,35 @@ không để chạy hết cả mẻ mới biết hỏng.
 
 ## 5. Thứ tự nguồn (engine tự thử, ra video thật là dừng)
 
+Tất cả đều là gọi HTTP thuần (kèm cookies nếu có) — **không mở trình duyệt**:
+
 | Loại link | Thứ tự thử |
 |---|---|
 | `.mp4` / `.m3u8` thẳng | tải luôn |
-| Douyin | iesdouyin (không cần cookies) → yt-dlp → quét trang → trình duyệt |
-| TikTok | yt-dlp (cookies + giả lập TLS) → tikwm → ssstik → trình duyệt |
-| Trang quảng cáo (ads.tiktok, oceanengine…) | quét trang → yt-dlp generic → trình duyệt |
-| Còn lại | yt-dlp → yt-dlp `best` → generic → quét trang → trình duyệt |
+| Douyin | iesdouyin (không cần cookies) → yt-dlp → quét trang |
+| TikTok | yt-dlp (cookies + giả lập TLS) → **API tiktok (cookies)** → tikwm → ssstik |
+| Trang quảng cáo (ads.tiktok, oceanengine…) | quét trang → API tiktok → yt-dlp generic |
+| Còn lại | yt-dlp → yt-dlp `best` → generic → quét trang |
 
-"Trình duyệt" = mở Edge/Chrome sẵn có với hồ sơ riêng (`~/.tnt_downloader/browser_profile`),
-nghe request mạng của trang rồi tải lấy luồng video. Bấm **Mở trình duyệt để
-đăng nhập** một lần, các lần sau tự nhớ phiên.
+### Khi nào mới mở trình duyệt
+
+Chỉ 2 trường hợp, đều do người dùng chủ động bấm:
+
+1. Nút **Mở trình duyệt để đăng nhập** — đăng nhập TikTok/Douyin/Ads Manager một lần,
+   app nhớ phiên ở `~/.tnt_downloader/browser_profile`. Sau đó việc *đọc* cookies từ hồ
+   sơ này **không** mở trình duyệt nữa (đọc thẳng file SQLite).
+2. Nút **Thử lại link lỗi bằng trình duyệt** — hiện ra sau khi chạy xong mẻ, chạy lại
+   *chỉ* những dòng lỗi, mỗi lần 1 link, có mở cửa sổ để bắt luồng.
+
+Ô **"Tự mở trình duyệt cho link khó"** mặc định TẮT. Bật lên thì mỗi link mà mọi
+nguồn API đều thất bại sẽ mở một cửa sổ — tải hàng trăm link đừng bật.
 
 ## 6. Xử lý khi tải lỗi
 
 | Lỗi hay gặp | Cách xử lý |
 |---|---|
-| TikTok/Douyin quảng cáo báo lỗi hết nguồn | dùng **Trình duyệt TNT** (mục 3) + bật **bắt luồng bằng trình duyệt** |
+| TikTok/Douyin quảng cáo báo lỗi hết nguồn | chọn Cookies = **Trình duyệt TNT** (mục 3); còn lỗi thì bấm **Thử lại link lỗi bằng trình duyệt** |
+| Chrome cứ bật lên liên tục khi tải nhiều link | tắt ô "Tự mở trình duyệt cho link khó" (từ bản 1.1.0 đã mặc định tắt) |
 | "Impersonate target chrome is not available" | `pip install -U curl_cffi` (cần >= 0.11) |
 | Không đọc được cookies Chrome/Edge | đóng hẳn trình duyệt rồi thử lại; vẫn hỏng thì dùng **Trình duyệt TNT** hoặc file cookies.txt (mục 3) |
 | YouTube báo "Sign in to confirm you're not a bot" | chọn nguồn cookies có đăng nhập YouTube (mục 3) |

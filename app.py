@@ -115,6 +115,8 @@ class MainWindow(QMainWindow):
         self.worker: Worker | None = None
         self.urls: list[str] = []
         self.results: list[Result] = []
+        # mẻ đang chạy gồm những DÒNG nào trên bảng (chạy lại link lỗi -> chỉ vài dòng)
+        self._rows: list[int] = []
         self._build_ui()
         self._load_cfg()
 
@@ -195,8 +197,13 @@ class MainWindow(QMainWindow):
             "  (App-Bound Encryption); Firefox thì vẫn đọc tốt.")
         g.addWidget(self.cb_browser, 1, 5)
 
-        self.chk_browser = QCheckBox("Bật chế độ bắt luồng bằng trình duyệt (cho link quảng cáo khó)")
-        self.chk_browser.setChecked(True)
+        self.chk_browser = QCheckBox("Tự mở trình duyệt cho link khó (⚠ tải nhiều link sẽ bật cửa sổ liên tục)")
+        self.chk_browser.setChecked(False)
+        self.chk_browser.setToolTip(
+            "TẮT (khuyên dùng): chỉ tải bằng API, chạy im lặng, không chiếm máy.\n"
+            "BẬT: mỗi link mà mọi nguồn API đều thất bại sẽ mở một cửa sổ trình duyệt.\n\n"
+            "Tải hàng trăm link thì để TẮT, xong mẻ hãy bấm “Thử lại link lỗi bằng "
+            "trình duyệt” cho những dòng còn đỏ.")
         self.chk_headless = QCheckBox("Chạy ẩn cửa sổ trình duyệt")
         self.btn_login = QPushButton("Mở trình duyệt để đăng nhập", objectName="ghost")
         self.btn_login.clicked.connect(self.on_login_browser)
@@ -222,10 +229,16 @@ class MainWindow(QMainWindow):
         self.btn_stop = QPushButton("■  Dừng", objectName="ghost")
         self.btn_stop.setEnabled(False)
         self.btn_stop.clicked.connect(self.on_stop)
+        self.btn_retry = QPushButton("Thử lại link lỗi bằng trình duyệt", objectName="ghost")
+        self.btn_retry.setEnabled(False)
+        self.btn_retry.setToolTip("Chạy lại CHỈ những dòng lỗi, có mở trình duyệt. "
+                                  "Làm một lượt cuối mẻ thay vì bật cửa sổ suốt lúc tải.")
+        self.btn_retry.clicked.connect(self.on_retry_failed)
         self.pb = QProgressBar()
         self.pb.setValue(0)
         run_row.addWidget(self.btn_start, 2)
         run_row.addWidget(self.btn_stop, 1)
+        run_row.addWidget(self.btn_retry, 2)
         run_row.addWidget(self.pb, 4)
         root.addLayout(run_row)
 
@@ -264,7 +277,7 @@ class MainWindow(QMainWindow):
         b = c.get("browser", "")
         bi = self.cb_browser.findData(b)
         self.cb_browser.setCurrentIndex(bi if bi >= 0 else 0)
-        self.chk_browser.setChecked(bool(c.get("browser_fallback", True)))
+        self.chk_browser.setChecked(bool(c.get("browser_fallback_v2", False)))
         self.chk_headless.setChecked(bool(c.get("headless", False)))
         self.ed_cookies.setText(c.get("cookies_file", ""))
 
@@ -273,7 +286,7 @@ class MainWindow(QMainWindow):
             "out_dir": self.ed_out.text().strip(),
             "concurrency": self.sp_conc.value(),
             "browser": self.cb_browser.currentData(),
-            "browser_fallback": self.chk_browser.isChecked(),
+            "browser_fallback_v2": self.chk_browser.isChecked(),
             "headless": self.chk_headless.isChecked(),
             "cookies_file": self.ed_cookies.text().strip(),
         })
@@ -382,14 +395,24 @@ class MainWindow(QMainWindow):
             cf = resolve_cookies(opts)
             self.log_line(f"Cookies: {os.path.basename(cf)}" if cf
                           else "⚠ " + (ck.last_error() or "không lấy được cookies từ nguồn đã chọn"))
+        self.log_line(f"── Bắt đầu tải {len(urls)} link → {out}"
+                      + ("" if opts.browser_fallback else "  (chỉ dùng API, không mở trình duyệt)"))
 
+        self._start_batch(list(range(len(urls))), opts)
+
+    def _start_batch(self, rows: list[int], opts: Options):
+        """Chạy một mẻ tải cho các DÒNG `rows` trên bảng (cả bảng, hoặc chỉ dòng lỗi)."""
+        self._rows = rows
         self.pb.setValue(0)
         self.done_count = 0
         self.btn_start.setEnabled(False)
+        self.btn_retry.setEnabled(False)
         self.btn_stop.setEnabled(True)
-        self.log_line(f"── Bắt đầu tải {len(urls)} link → {out}")
+        for i in rows:                       # xoá trạng thái cũ của các dòng sắp chạy lại
+            self._set(i, 3, "chờ")
+            self._set(i, 4, "—")
 
-        self.worker = Worker(urls, opts)
+        self.worker = Worker([self.urls[i] for i in rows], opts)
         self.worker.itemStart.connect(self.on_item_start)
         self.worker.itemProgress.connect(self.on_item_progress)
         self.worker.itemDone.connect(self.on_item_done)
@@ -403,13 +426,17 @@ class MainWindow(QMainWindow):
             self.log_line("Đã yêu cầu dừng — các link đang tải sẽ chạy nốt.")
             self.btn_stop.setEnabled(False)
 
+    def _row(self, i: int) -> int:
+        return self._rows[i] if i < len(self._rows) else i
+
     def on_item_start(self, i: int, url: str):
-        self._set(i, 3, "đang tải")
+        self._set(self._row(i), 3, "đang tải")
 
     def on_item_progress(self, i: int, got: int, total: int):
-        self._set(i, 4, f"{got * 100 // total}%" if total else human_size(got))
+        self._set(self._row(i), 4, f"{got * 100 // total}%" if total else human_size(got))
 
     def on_item_done(self, i: int, r: Result):
+        i = self._row(i)
         self.results[i] = r
         if r.ok:
             self._set(i, 3, "✔ xong")
@@ -425,16 +452,35 @@ class MainWindow(QMainWindow):
                 it.setToolTip(r.error)
             self.log_line(f"  ✗ [{i + 1}] {r.error}")
         self.done_count += 1
-        self.pb.setValue(int(self.done_count * 100 / max(1, len(self.urls))))
+        self.pb.setValue(int(self.done_count * 100 / max(1, len(self._rows))))
 
     def on_all_done(self, _res):
         ok = sum(1 for r in self.results if r.ok)
+        failed = [i for i, r in enumerate(self.results) if not r.ok]
         self.btn_start.setEnabled(True)
         self.btn_stop.setEnabled(False)
         self.pb.setValue(100)
-        self.log_line(f"── XONG: {ok} thành công · {len(self.results) - ok} lỗi")
+        self.log_line(f"── XONG: {ok} thành công · {len(failed)} lỗi")
+        # Còn link lỗi -> mời dùng trình duyệt MỘT LƯỢT cho riêng chúng, thay vì
+        # bật cửa sổ suốt lúc tải cả mẻ.
+        can_retry = bool(failed) and sniffer.available() and not self.chk_browser.isChecked()
+        self.btn_retry.setEnabled(can_retry)
+        if can_retry:
+            self.log_line(f"   {len(failed)} link lỗi — có thể bấm “Thử lại link lỗi bằng "
+                          "trình duyệt” (sẽ mở cửa sổ, chỉ chạy cho các link này).")
         if ok:
             open_folder(self.ed_out.text().strip())
+
+    def on_retry_failed(self):
+        """Chạy lại CHỈ những dòng lỗi, lần này cho phép mở trình duyệt bắt luồng."""
+        rows = [i for i, r in enumerate(self.results) if not r.ok]
+        if not rows:
+            return
+        opts = self._opts()
+        opts.browser_fallback = True
+        opts.concurrency = 1          # 1 cửa sổ trình duyệt tại một thời điểm
+        self.log_line(f"── Chạy lại {len(rows)} link lỗi bằng trình duyệt (mỗi lần 1 link)")
+        self._start_batch(rows, opts)
 
     def on_row_open(self):
         row = self.tbl.currentRow()

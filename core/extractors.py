@@ -365,3 +365,62 @@ def scrape_page(url: str, out_dir: str, session: requests.Session,
         except Exception as e:
             last = e
     raise RuntimeError(f"quét trang: mọi link đều lỗi ({clean_error(last)})")
+
+
+# ───────────── 6. API web nội bộ của TikTok (chạy bằng cookies) ─────────────
+def tiktok_web_api(url: str, out_dir: str, session: requests.Session,
+                   on_progress: Progress = None) -> dict:
+    """Gọi thẳng API mà trang tiktok.com dùng — KHÔNG mở trình duyệt.
+
+    Đây là đường tải VIDEO QUẢNG CÁO không cần bật Chrome: cùng một endpoint mà
+    trang web gọi, chỉ khác là ta gửi kèm cookies đã đăng nhập của người dùng nên
+    thấy được đúng những gì họ thấy. Không có cookies thì TikTok hay trả rỗng ->
+    engine tự lùi sang tikwm/ssstik.
+    """
+    m = (re.search(r"/(?:video|photo)/(\d{6,})", url)
+         or re.search(r"item_id=(\d{6,})", url) or re.search(r"(\d{15,})", url))
+    if not m:
+        raise RuntimeError("không tách được id video tiktok")
+    vid = m.group(1)
+    r = session.get(
+        "https://www.tiktok.com/api/item/detail/",
+        params={"itemId": vid, "aid": "1988", "app_name": "tiktok_web",
+                "device_platform": "web_pc", "channel": "tiktok_web",
+                "app_language": "vi-VN", "region": "VN", "language": "vi"},
+        headers={"User-Agent": UA_DESKTOP, "Referer": url,
+                 "Accept": "application/json, text/plain, */*"},
+        timeout=25)
+    r.raise_for_status()
+    try:
+        j = r.json()
+    except Exception:
+        raise RuntimeError("API tiktok trả về không phải JSON (thiếu cookies?)")
+    item = ((j.get("itemInfo") or {}).get("itemStruct")) or {}
+    video = item.get("video") or {}
+    if not item:
+        raise RuntimeError(f"API tiktok không có dữ liệu (status {j.get('statusCode')})")
+
+    # Gom mọi link phát: bitrateInfo (nhiều mức nét) trước, rồi playAddr/downloadAddr.
+    cands: list[str] = []
+    for b in (video.get("bitrateInfo") or []):
+        cands += ((b.get("PlayAddr") or {}).get("UrlList") or [])
+    for key in ("playAddr", "downloadAddr"):
+        if video.get(key):
+            cands.append(video[key])
+    cands = [u for u in dict.fromkeys(cands) if u]
+    if not cands:
+        raise RuntimeError("API tiktok không trả link phát (có thể là bài ảnh)")
+
+    title = (item.get("desc") or "").strip()
+    out = unique_path(os.path.join(out_dir, f"{safe_name(title, vid)} [{vid}].mp4"))
+    last = None
+    for u in cands[:4]:
+        try:
+            stream_download(session, u, out,
+                            headers={"User-Agent": UA_DESKTOP,
+                                     "Referer": "https://www.tiktok.com/"},
+                            on_progress=on_progress, timeout=120)
+            return _finish(out, title or vid, url, "tiktok-api")
+        except Exception as e:
+            last = e
+    raise RuntimeError(f"tải link từ API tiktok thất bại: {clean_error(last)}")
