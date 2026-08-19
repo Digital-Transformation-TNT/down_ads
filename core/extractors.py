@@ -75,17 +75,24 @@ def stream_download(session: requests.Session, url: str, path: str,
         h.setdefault("Referer", ref)
     tmp = path + ".part"
     got = 0
-    with session.get(url, headers=h, stream=True, timeout=timeout) as r:
-        r.raise_for_status()
-        total = int(r.headers.get("Content-Length") or 0)
-        with open(tmp, "wb") as f:
-            for chunk in r.iter_content(1 << 17):
-                if not chunk:
-                    continue
-                f.write(chunk)
-                got += len(chunk)
-                if on_progress:
-                    on_progress(got, total)
+    try:
+        with session.get(url, headers=h, stream=True, timeout=timeout) as r:
+            r.raise_for_status()
+            total = int(r.headers.get("Content-Length") or 0)
+            with open(tmp, "wb") as f:
+                for chunk in r.iter_content(1 << 17):
+                    if not chunk:
+                        continue
+                    f.write(chunk)
+                    got += len(chunk)
+                    if on_progress:
+                        on_progress(got, total)
+    except BaseException:
+        try:                       # tải dở -> dọn .part, đừng để rác lại cho người dùng
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
     os.replace(tmp, path)
     return path
 

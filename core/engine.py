@@ -257,6 +257,16 @@ def _ydl_opts(opts: Options, source: str, generic: bool = False,
     return o
 
 
+def _cleanup(base: str) -> None:
+    """Xoá mọi mảnh file mà yt-dlp để lại cho một lần tải hỏng (cùng phần tên gốc)."""
+    import glob
+    for f in glob.glob(glob.escape(base) + ".*"):
+        try:
+            os.remove(f)
+        except OSError:
+            pass
+
+
 def _ydl_attempt(url: str, opts: Options, source: str, generic: bool = False,
                  fmt: str | None = None, on_progress=None) -> dict:
     import yt_dlp  # type: ignore
@@ -278,6 +288,10 @@ def _ydl_attempt(url: str, opts: Options, source: str, generic: bool = False,
         if not os.path.exists(path):
             raise RuntimeError("yt-dlp không tạo được file")
         if not has_video_stream(path):
+            # TikTok hay chặn extraction -> yt-dlp chỉ bóc được TIẾNG (file mp3/m4a).
+            # Phải DỌN file rác đó đi trước khi lùi sang nguồn khác, không thì mỗi
+            # link hỏng để lại một file lạc trong thư mục lưu của người dùng.
+            _cleanup(base)
             raise RuntimeError("file tải về không phải video xem được "
                                "(có thể là bài ảnh/slideshow hoặc trang không có video)")
         return {
