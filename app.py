@@ -178,10 +178,20 @@ class MainWindow(QMainWindow):
         g.addWidget(btn_out, 0, 4)
         g.addWidget(btn_open, 0, 5)
 
+        self.chk_open = QCheckBox("Mở thư mục khi tải xong")
+        self.chk_open.setChecked(False)
+        self.chk_open.setToolTip(
+            "Tắt (mặc định): tải xong app im lặng, không cướp màn hình.\n"
+            "Thư mục vẫn mở được bằng nút “Mở thư mục”.")
+        g.addWidget(self.chk_open, 1, 0, 1, 2)
+
         g.addWidget(QLabel("Tải song song:"), 1, 2)
         self.sp_conc = QSpinBox()
         self.sp_conc.setRange(1, 8)
         self.sp_conc.setValue(3)
+        self.sp_conc.setToolTip(
+            "3–4 là vừa. Để 7–8 thì tải nhanh hơn nhưng chiếm gần hết băng thông,\n"
+            "lướt web / họp online trên máy sẽ chậm theo.")
         g.addWidget(self.sp_conc, 1, 3)
 
         g.addWidget(QLabel("Cookies từ:"), 1, 4)
@@ -280,6 +290,7 @@ class MainWindow(QMainWindow):
         self.chk_browser.setChecked(bool(c.get("browser_fallback_v2", False)))
         self.chk_headless.setChecked(bool(c.get("headless", False)))
         self.ed_cookies.setText(c.get("cookies_file", ""))
+        self.chk_open.setChecked(bool(c.get("open_when_done", False)))
 
     def _save_cfg(self):
         save_config({
@@ -289,6 +300,7 @@ class MainWindow(QMainWindow):
             "browser_fallback_v2": self.chk_browser.isChecked(),
             "headless": self.chk_headless.isChecked(),
             "cookies_file": self.ed_cookies.text().strip(),
+            "open_when_done": self.chk_open.isChecked(),
         })
 
     def _opts(self) -> Options:
@@ -468,7 +480,7 @@ class MainWindow(QMainWindow):
         if can_retry:
             self.log_line(f"   {len(failed)} link lỗi — có thể bấm “Thử lại link lỗi bằng "
                           "trình duyệt” (sẽ mở cửa sổ, chỉ chạy cho các link này).")
-        if ok:
+        if ok and self.chk_open.isChecked():
             open_folder(self.ed_out.text().strip())
 
     def on_retry_failed(self):

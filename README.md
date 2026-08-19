@@ -94,6 +94,18 @@ Chỉ 2 trường hợp, đều do người dùng chủ động bấm:
 Ô **"Tự mở trình duyệt cho link khó"** mặc định TẮT. Bật lên thì mỗi link mà mọi
 nguồn API đều thất bại sẽ mở một cửa sổ — tải hàng trăm link đừng bật.
 
+### Tải chạy nền, không chiếm máy
+
+Lúc tải app **không đụng gì tới Chrome/Edge đang mở** của bạn: không mở, không đóng,
+không đọc phiên đang chạy. Việc còn lại có thể ảnh hưởng máy:
+
+| Thứ | Ảnh hưởng | Cách chỉnh |
+|---|---|---|
+| Băng thông | tải song song 7–8 link ăn gần hết đường truyền, lướt web/họp online chậm theo | để **Tải song song = 3–4** |
+| CPU | chỉ nặng khi gặp bài **ảnh/slideshow** (phải ghép ảnh + nhạc bằng ffmpeg). Video thường chỉ là tải file | — |
+| Cửa sổ bật lên | mặc định KHÔNG bật gì: không mở trình duyệt, cũng không tự mở thư mục khi xong | bật lại bằng ô **"Mở thư mục khi tải xong"** |
+| macOS lần đầu | có thể hiện hộp Keychain xin quyền đọc cookies | bấm **Always Allow**, các lần sau im lặng |
+
 ## 6. Xử lý khi tải lỗi
 
 | Lỗi hay gặp | Cách xử lý |
