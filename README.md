@@ -117,6 +117,7 @@ không đọc phiên đang chạy. Việc còn lại có thể ảnh hưởng m�
 | YouTube báo "Sign in to confirm you're not a bot" | chọn nguồn cookies có đăng nhập YouTube (mục 3) |
 | Trình duyệt không thấy luồng video | tắt "chạy ẩn", tự bấm play/đăng nhập trong cửa sổ hiện ra rồi chạy lại |
 | Link cũ tự nhiên hỏng | `pip install -U yt-dlp` (site đổi liên tục) |
+| macOS: để license.key cạnh .app mà vẫn báo chưa có key | App Translocation — kéo app vào Applications, hoặc `xattr -dr com.apple.quarantine TNT_Downloader.app`, hoặc đặt key vào `~/Library/Application Support/TNT/` (xem mục 8) |
 
 ## 7. Cấu trúc
 
@@ -146,7 +147,19 @@ Tool dùng chung lớp bảo mật ở `tnt_license_kit`: chữ ký số **Ed255
 - Không có `license.key` hợp lệ → app hiện **mã máy** (kèm nút Copy) rồi thoát;
   bản CLI in mã máy ra console. Không chạy được gì thêm.
 - Nơi tool tìm license, theo thứ tự: biến môi trường `TNT_LICENSE_PATH` →
-  **cạnh file exe/script** → `C:\TNT\license.key`.
+  **cạnh file exe / .app** → `C:\TNT\license.key` (Windows) hoặc
+  `/Library/Application Support/TNT/` (macOS) → rồi các chỗ dự phòng:
+  `~/Library/Application Support/TNT/`, `~/Downloads`, `~/Desktop`, `/Applications`.
+- Chấp nhận cả tên `license.key.txt` / `license.txt` — Finder và Explorer mặc định
+  ẩn đuôi file nên người dùng rất hay lưu nhầm thành `.txt`.
+
+> ⚠ **macOS — App Translocation.** App tải từ mạng mang cờ `com.apple.quarantine`.
+> Mở lần đầu bằng double-click, macOS **không chạy app tại chỗ** mà copy vào một
+> thư mục ngẫu nhiên chỉ-đọc `/private/var/folders/…/AppTranslocation/…` rồi chạy
+> bản đó — nên "cạnh app" lúc chạy là thư mục ngẫu nhiên kia, và `license.key` đặt
+> đúng chỗ vẫn **không được nhìn thấy**. Từ v1.1.3 app tự dò ra chỗ đặt app thật
+> nên vẫn chạy được; muốn dứt điểm thì kéo app vào **Applications**, hoặc chạy
+> `xattr -dr com.apple.quarantine TNT_Downloader.app`.
 - Một `license.key` dùng chung cho mọi tool TNT trên đúng máy đó.
 
 **Cấp license cho một máy:**

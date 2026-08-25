@@ -57,6 +57,10 @@ PUBLIC_KEY_HEX = "318a767a624f917ebf35b6a861ee1d36b935c526f90c499f9d1e170eddd96a
 COMMON_LICENSE_PATH = r"C:\TNT\license.key"        # Windows: ổ C chung
 COMMON_LICENSE_PATH_POSIX = "/Library/Application Support/TNT/license.key"  # macOS
 LICENSE_FILENAME = "license.key"
+# Finder/Explorer mặc định ẨN phần mở rộng -> người dùng lưu file rất hay thành
+# "license.key.txt" mà trên màn hình vẫn thấy là "license.key". Chấp nhận luôn
+# mấy biến thể đó thay vì bắt họ đi bật hiện đuôi file.
+LICENSE_FILENAMES = ("license.key", "license.key.txt", "license.txt", "License.key")
 
 # Sai số cho phép khi so ngày hết hạn (không dùng — để dành nếu cần).
 # ===================================================================== #
@@ -275,16 +279,83 @@ def _app_dir() -> Path:
     return Path(sys.argv[0]).resolve().parent if sys.argv and sys.argv[0] else Path.cwd()
 
 
+def _translocated() -> bool:
+    """macOS có đang chạy app từ BẢN SAO TẠM không? (App Translocation)
+
+    App tải từ mạng mang cờ com.apple.quarantine. Mở lần đầu bằng double-click,
+    macOS KHÔNG chạy app tại chỗ mà copy nó vào một thư mục ngẫu nhiên chỉ-đọc
+    /private/var/folders/.../AppTranslocation/<UUID>/d/Foo.app rồi chạy bản đó.
+    Hậu quả: "cạnh app" lúc chạy là thư mục ngẫu nhiên kia, nên license.key mà
+    người dùng đặt cạnh app THẬT không bao giờ được tìm thấy — app cứ báo chưa
+    có license dù file nằm đúng chỗ.
+    """
+    if not getattr(sys, "frozen", False):
+        return False
+    try:
+        return "/AppTranslocation/" in str(Path(sys.executable).resolve())
+    except Exception:
+        return False
+
+
+def _extra_search_dirs() -> list[Path]:
+    """Thư mục dự phòng để tìm license (cứu tình huống App Translocation ở trên)."""
+    dirs: list[Path] = []
+    try:
+        home = Path.home()
+    except Exception:
+        return dirs
+    if sys.platform == "darwin":
+        dirs += [home / "Library" / "Application Support" / "TNT",
+                 home / "Downloads", home / "Desktop",
+                 home / "Applications", Path("/Applications"), home]
+        if _translocated():
+            # Người dùng hay giải nén cả thư mục con (Downloads/TNT_Downloader/App…).
+            # Lúc bị translocation thì phải tự dò ra chỗ đặt app THẬT mới thấy license.
+            dirs += _mac_app_neighbors(home)
+    elif sys.platform.startswith("win"):
+        dirs += [home / "Downloads", home / "Desktop"]
+    else:
+        dirs += [home / ".config" / "TNT", home / "Downloads", home]
+    return dirs
+
+
+def _mac_app_neighbors(home: Path) -> list[Path]:
+    """Các thư mục đang chứa TNT*.app (quét nông) — nơi license.key hay nằm cạnh."""
+    found: list[Path] = []
+    roots = [home / "Downloads", home / "Desktop", home / "Applications", Path("/Applications")]
+    for root in roots:
+        try:
+            children = list(root.iterdir())[:200]
+        except Exception:
+            continue
+        for child in children:
+            try:
+                if child.suffix == ".app" and child.name.startswith("TNT"):
+                    found.append(root)
+                elif child.is_dir() and child.suffix != ".app":
+                    for sub in list(child.iterdir())[:100]:      # xuống 1 cấp là đủ
+                        if sub.suffix == ".app" and sub.name.startswith("TNT"):
+                            found.append(child)
+                            break
+            except Exception:
+                continue
+    return found
+
+
 def _candidate_paths() -> list[Path]:
     paths: list[Path] = []
     env = os.environ.get("TNT_LICENSE_PATH")
     if env:
         paths.append(Path(env))
-    paths.append(_app_dir() / LICENSE_FILENAME)
+    for name in LICENSE_FILENAMES:
+        paths.append(_app_dir() / name)
     if sys.platform.startswith("win"):
         paths.append(Path(COMMON_LICENSE_PATH))
     else:
         paths.append(Path(COMMON_LICENSE_PATH_POSIX))
+    for d in _extra_search_dirs():
+        for name in LICENSE_FILENAMES:
+            paths.append(d / name)
     # loại trùng, giữ thứ tự
     seen, uniq = set(), []
     for p in paths:
@@ -519,6 +590,31 @@ def show_machine_id(reason: str = "MÃ MÁY", tool_name: str = "") -> str:
     return mid
 
 
+def _missing_license_message() -> str:
+    """Thông báo thiếu license KÈM CHẨN ĐOÁN — để khỏi phải đoán mò khi báo lỗi.
+
+    Nêu rõ đã tìm ở đâu, và cảnh báo riêng tình huống macOS App Translocation
+    (license đặt đúng chỗ nhưng app đang chạy từ bản sao tạm nên không thấy).
+    """
+    lines = [f"Không tìm thấy file '{LICENSE_FILENAME}'. Máy này CHƯA được cấp phép."]
+    if _translocated():
+        lines += [
+            "",
+            "NGUYÊN NHÂN: macOS đang chạy app từ một BẢN SAO TẠM (App Translocation),",
+            "nên app không nhìn thấy file đặt cạnh nó. Cách sửa (chọn 1):",
+            "  1. Kéo TNT_Downloader.app vào thư mục Applications rồi mở lại, HOẶC",
+            "  2. Mở Terminal và chạy:",
+            "     xattr -dr com.apple.quarantine /đường/dẫn/TNT_Downloader.app",
+            "  3. Hoặc đặt license.key vào: ~/Library/Application Support/TNT/",
+        ]
+    lines += ["", "Đã tìm ở các vị trí sau:"]
+    for p in _candidate_paths()[:12]:
+        lines.append(f"  • {p}")
+    lines += ["", "Mẹo: Finder/Explorer hay ẩn đuôi file — kiểm tra file không bị",
+              "thành 'license.key.txt' (bản này vẫn chấp nhận, nhưng nên để đúng tên)."]
+    return "\n".join(lines)
+
+
 def _deny_and_exit(reason: str, tool_name: str) -> "None":
     """Báo lỗi rõ ràng + hiện mã máy (có nút Copy), rồi THOÁT. Không lộ stack trace."""
     show_machine_id(reason, tool_name)
@@ -540,10 +636,7 @@ def check_license(tool_name: str, *, raise_on_error: bool = False) -> LicenseInf
     try:
         lic_path = _find_license_file()
         if lic_path is None:
-            raise LicenseError(
-                f"Không tìm thấy file '{LICENSE_FILENAME}'. "
-                f"Máy này CHƯA được cấp phép."
-            )
+            raise LicenseError(_missing_license_message())
         text = lic_path.read_text(encoding="utf-8", errors="ignore")
         info = verify_license_text(text, tool_name)
         return info
