@@ -2,9 +2,16 @@
 r"""
 PyInstaller spec — dựng TNT Downloader thành .exe (Windows, one-dir).
 
-Build:
-    pip install -r requirements.txt pyinstaller
-    pyinstaller tnt_downloader.spec
+Build (LUÔN build trong venv SẠCH — xem ghi chú "patchright" bên dưới):
+    python -m venv .venv
+    .venv\Scripts\python -m pip install -r requirements.txt pyinstaller
+    .venv\Scripts\python -m PyInstaller tnt_downloader.spec
+
+⚠ ĐỪNG build bằng Python hệ thống/Anaconda dùng chung: gói nào cài trong đó mà có
+đăng ký hook PyInstaller sẽ tự chui vào bản phát hành. Đã dính thật với
+`patchright` (bản fork của Playwright, do tool khác cài) — nó đăng ký hook cho
+`playwright.sync_api` nên bơm thêm 102 MB vào gói dù tool KHÔNG hề import, và
+`excludes` không chặn được vì hook thêm file trực tiếp chứ không qua import.
 
 Kết quả:  dist/TNT_Downloader/TNT_Downloader.exe
 
@@ -91,6 +98,10 @@ if BUNDLE_CHROMIUM:
 # trường Anaconda). Loại thẳng cho nhẹ ~120 MB.
 EXCLUDES = [
     "imageio_ffmpeg",           # ffmpeg thứ 2 (84 MB) — đã nhúng ffmpeg.exe rồi
+    # patchright là bản fork của Playwright; nếu máy build có cài nó (tool khác
+    # dùng) thì nó tự đăng ký hook PyInstaller cho playwright và kéo thêm 102 MB
+    # vào gói dù tool KHÔNG hề import. Loại thẳng.
+    "patchright",
     "numpy", "scipy", "pandas", "PIL", "matplotlib", "IPython", "lxml",
     "tkinter", "test", "pydoc_data",
     # KHÔNG loại sqlite3: yt-dlp cần nó để đọc cookies từ trình duyệt.

@@ -67,6 +67,7 @@ if BUNDLE_FFMPEG:
 # Thư viện KHÔNG dùng nhưng PyInstaller hay kéo theo -> loại cho nhẹ.
 EXCLUDES = [
     "imageio_ffmpeg",           # ffmpeg thứ 2 — đã nhúng bản static rồi
+    "patchright",               # fork của Playwright, lọt vào gói qua hook nếu máy build có cài
     "numpy", "scipy", "pandas", "PIL", "matplotlib", "IPython", "lxml",
     "tkinter", "test", "pydoc_data",
     # KHÔNG loại sqlite3: yt-dlp cần nó để đọc cookies từ trình duyệt.

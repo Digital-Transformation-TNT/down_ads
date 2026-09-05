@@ -184,9 +184,15 @@ nếu muốn giới hạn thời gian.
 ## 9. Build .exe
 
 ```bash
-pip install -r requirements.txt pyinstaller
-pyinstaller tnt_downloader.spec
+python -m venv .venv
+.venv\Scripts\python -m pip install -r requirements.txt pyinstaller
+.venv\Scripts\python -m PyInstaller tnt_downloader.spec
 ```
+
+⚠ **Luôn build trong venv sạch.** Build bằng Python hệ thống/Anaconda dùng chung
+thì gói nào có đăng ký hook PyInstaller cũng tự chui vào bản phát hành — đã dính
+thật với `patchright` (fork của Playwright do tool khác cài), nó bơm thêm 102 MB
+dù tool không hề import, và `excludes` không chặn được.
 
 Ra `dist/TNT_Downloader/TNT_Downloader.exe` (~361 MB), đã **nhúng sẵn ffmpeg**;
 trình duyệt thì mượn Edge/Chrome có sẵn trên máy đích. Phát hành: copy nguyên thư
