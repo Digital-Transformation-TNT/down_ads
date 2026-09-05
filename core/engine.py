@@ -14,8 +14,8 @@ khi người dùng tự bật (`browser_fallback`) — dùng cho vài link khó 
 
 Thứ tự thử nguồn (dừng ở nguồn đầu tiên ra được video thật):
   link .mp4 thẳng   → tải luôn
-  douyin            → iesdouyin → yt-dlp → quét trang
-  tiktok            → yt-dlp → API tiktok (cookies) → tikwm → ssstik
+  douyin            → savetik → API douyin (cookies) → iesdouyin → yt-dlp → quét trang
+  tiktok            → yt-dlp → API tiktok (cookies) → tikwm → savetik → ssstik
   trang quảng cáo   → quét trang → API tiktok → yt-dlp generic
   còn lại           → yt-dlp → yt-dlp "best" → generic → quét trang
   (+ "trình duyệt bắt luồng" nối vào cuối mọi chuỗi NẾU người dùng bật)
@@ -329,6 +329,8 @@ def download_one(url: str, opts: Options, on_progress=None, on_log=None) -> Resu
         steps.append(("link trực tiếp", lambda: ex.direct_media(url, opts.out_dir, sess, on_progress)))
     elif source == "douyin":
         steps += [
+            ("savetik", lambda: ex.savetik(url, opts.out_dir, sess, on_progress)),
+            ("API douyin", lambda: ex.douyin_web_api(url, opts.out_dir, sess, on_progress)),
             ("douyin (iesdouyin)", lambda: ex.douyin_share(url, opts.out_dir, sess_m, on_progress)),
             ("yt-dlp", lambda: _ydl_attempt(url, opts, source, on_progress=on_progress)),
             ("quét trang", lambda: ex.scrape_page(url, opts.out_dir, sess, on_progress)),
@@ -338,6 +340,7 @@ def download_one(url: str, opts: Options, on_progress=None, on_log=None) -> Resu
             ("yt-dlp", lambda: _ydl_attempt(url, opts, source, on_progress=on_progress)),
             ("API tiktok", lambda: ex.tiktok_web_api(url, opts.out_dir, sess, on_progress)),
             ("tikwm", lambda: ex.tikwm(url, opts.out_dir, sess_m, on_progress)),
+            ("savetik", lambda: ex.savetik(url, opts.out_dir, sess, on_progress)),
             ("ssstik", lambda: ex.ssstik(url, opts.out_dir, sess, on_progress)),
         ]
     elif source == "ads":

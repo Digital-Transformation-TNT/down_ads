@@ -12,6 +12,7 @@ Riêng cho VIDEO QUẢNG CÁO:
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import re
@@ -431,3 +432,183 @@ def tiktok_web_api(url: str, out_dir: str, session: requests.Session,
         except Exception as e:
             last = e
     raise RuntimeError(f"tải link từ API tiktok thất bại: {clean_error(last)}")
+
+
+# ───────────── 7. API web nội bộ của Douyin (chạy bằng cookies) ─────────────
+_DY_API = "https://www.douyin.com/aweme/v1/web/aweme/detail/"
+
+
+def douyin_web_api(url: str, out_dir: str, session: requests.Session,
+                   on_progress: Progress = None) -> dict:
+    """Gọi thẳng API mà trang douyin.com dùng — KHÔNG mở trình duyệt.
+
+    Từ 2026 Douyin bỏ hẳn dữ liệu video khỏi trang share iesdouyin (chỉ còn
+    metadata trang), nên cách bóc HTML cũ chết. API này là đường còn lại, nhưng
+    có "ArgusSecurityPlugin" chặn request thiếu cookies của trình duyệt thật.
+
+    Hai điều đo được khi thử nghiệm, quyết định cách viết hàm này:
+    1. Cookies douyin trong hồ sơ trình duyệt dùng lại được nhiều lần, kể cả
+       cookies lấy từ trước đó khá lâu — không cần lấy mới mỗi lần tải.
+    2. Server chặn NGẪU NHIÊN, xen kẽ 403/200 ngay trong cùng một phiên. Nên
+       gặp 403 thì cứ thử lại, đừng vội bỏ sang nguồn khác.
+    """
+    m = (re.search(r"/video/(\d+)", url) or re.search(r"modal_id=(\d+)", url)
+         or re.search(r"(\d{15,})", url))
+    if not m:
+        raise RuntimeError("không tìm được id video douyin")
+    vid = m.group(1)
+    params = {"aweme_id": vid, "device_platform": "webapp", "aid": "6383",
+              "channel": "channel_pc_web", "pc_client_type": "1",
+              "version_code": "190500", "version_name": "19.5.0",
+              "cookie_enabled": "true", "platform": "PC"}
+    headers = {"User-Agent": UA_DESKTOP,
+               "Referer": f"https://www.douyin.com/video/{vid}",
+               "Accept": "application/json, text/plain, */*"}
+
+    detail = None
+    last = ""
+    for att in range(5):                 # chặn ngẫu nhiên -> kiên nhẫn thử lại
+        try:
+            r = session.get(_DY_API, params=params, timeout=25, headers=headers)
+            if r.status_code == 200 and len(r.text) > 500:
+                detail = (r.json() or {}).get("aweme_detail")
+                if detail:
+                    break
+            last = f"HTTP {r.status_code}: {r.text[:60].strip()}"
+        except Exception as e:
+            last = clean_error(e)
+        time.sleep(1.0 + 0.8 * att)
+    if not detail:
+        raise RuntimeError(
+            f"API douyin chặn ({last}). Cần cookies douyin: chọn Cookies = "
+            "“Trình duyệt TNT” và ghé douyin.com một lần bằng nút “Mở trình duyệt”.")
+
+    v = detail.get("video") or {}
+    urls: list[str] = list((v.get("play_addr") or {}).get("url_list") or [])
+    for b in (v.get("bit_rate") or []):          # nhiều mức nét, lấy hết rồi thử lần lượt
+        urls += ((b.get("play_addr") or {}).get("url_list") or [])
+    for key in ("play_addr_h264", "play_addr_265", "download_addr"):
+        urls += ((v.get(key) or {}).get("url_list") or [])
+    urls = [u for u in dict.fromkeys(urls) if u]
+    if not urls:
+        raise RuntimeError("API douyin không trả link phát (có thể là bài ảnh)")
+
+    title = (detail.get("desc") or "").strip()
+    out = unique_path(os.path.join(out_dir, f"{safe_name(title, vid)} [{vid}].mp4"))
+    last_err = None
+    for u in urls[:5]:
+        try:
+            stream_download(session, u, out,
+                            headers={"User-Agent": UA_DESKTOP,
+                                     "Referer": "https://www.douyin.com/"},
+                            on_progress=on_progress, timeout=120)
+            return _finish(out, title or vid, url, "douyin-api")
+        except Exception as e:
+            last_err = e
+    raise RuntimeError(f"tải link từ API douyin thất bại: {clean_error(last_err)}")
+
+
+# ──────── 8. savetik / snapcdn — kiểu snaptik, KHÔNG cần cookies ────────
+_SAVETIK_HOME = "https://savetik.co/vi"
+_SAVETIK_API = "https://savetik.co/api/ajaxSearch"
+_SNAPCDN_RE = re.compile(r'<a[^>]+href="(https://dl\.snapcdn\.app/get\?token=[^"]+)"[^>]*>(.{0,80}?)</a>',
+                         re.S | re.I)
+
+
+def _snapcdn_origin(link: str) -> str:
+    """Bóc link CDN GỐC nằm trong token JWT của snapcdn (để tải thẳng nếu cần).
+
+    Token là JWT không mã hoá: phần payload base64 chứa {"url": "<link CDN thật>"}.
+    """
+    try:
+        payload = link.split("token=", 1)[1].split(".")[1]
+        payload += "=" * (-len(payload) % 4)
+        return json.loads(base64.urlsafe_b64decode(payload)).get("url") or ""
+    except Exception:
+        return ""
+
+
+def savetik(url: str, out_dir: str, session: requests.Session,
+            on_progress: Progress = None) -> dict:
+    """Bóc video qua savetik.co — cùng cách mà các site snaptik/savetik đang dùng.
+
+    Vì sao cần: từ 2026 Douyin bỏ dữ liệu video khỏi trang share và khoá API bằng
+    ArgusSecurityPlugin, nên mọi cách bóc trực tiếp đều chết nếu không có cookies
+    trình duyệt. Các site tải video vẫn sống vì họ có hạ tầng riêng đã qua được
+    lớp chặn đó; ta hỏi họ và nhận về link CDN thật.
+
+    Trả về link dạng dl.snapcdn.app/get?token=<JWT> — trong JWT có sẵn link CDN
+    gốc, nên hỏng proxy của họ thì vẫn tải thẳng được.
+    """
+    hdr = {"User-Agent": UA_DESKTOP, "Referer": _SAVETIK_HOME,
+           "Origin": "https://savetik.co", "X-Requested-With": "XMLHttpRequest"}
+    try:
+        session.get(_SAVETIK_HOME, timeout=20, headers={"User-Agent": UA_DESKTOP})
+    except Exception:
+        pass                                   # không lấy được trang chủ vẫn thử API
+
+    data = None
+    last = ""
+    for att in range(3):
+        try:
+            r = session.post(_SAVETIK_API, data={"q": url, "lang": "vi"},
+                             headers=hdr, timeout=30)
+            r.raise_for_status()
+            j = r.json()
+            if j.get("status") == "ok" and j.get("data"):
+                data = j["data"]
+                break
+            last = str(j.get("mess") or j.get("status") or "")[:80]
+        except Exception as e:
+            last = clean_error(e)
+        time.sleep(1.0 + att)
+    if not data:
+        raise RuntimeError(f"savetik không trả dữ liệu ({last})")
+
+    title = ""
+    mt = re.search(r"<h3[^>]*>([^<]{1,200})</h3>", data)
+    if mt:
+        title = mt.group(1).strip()
+
+    # Gom link, bỏ nhạc (MP3).
+    links: list[str] = []
+    for m in _SNAPCDN_RE.finditer(data):
+        label = re.sub(r"<[^>]+>|\s+", " ", m.group(2)).strip().lower()
+        if "mp3" in label or "audio" in label or "nhạc" in label:
+            continue
+        links.append(m.group(1))
+    if not links:
+        raise RuntimeError("savetik không có link video (có thể là bài ảnh)")
+
+    # NHÃN CỦA SAVETIK KHÔNG ĐÁNG TIN: đo thực tế thấy link ghi "MP4 HD" lại là
+    # bản 576p (3.7MB) còn "MP4 [1]" mới là 720p (5.4MB). Vì vậy hỏi dung lượng
+    # thật rồi lấy file to nhất — vài request nhẹ, đổi lại không tải nhầm bản mờ.
+    def _remote_size(link: str) -> int:
+        try:
+            with session.get(link, stream=True, timeout=20,
+                             headers={"User-Agent": UA_DESKTOP,
+                                      "Referer": "https://savetik.co/"}) as r:
+                r.raise_for_status()
+                return int(r.headers.get("Content-Length") or 0)
+        except Exception:
+            return 0
+
+    cands = sorted(((-_remote_size(u), u) for u in links[:4]), key=lambda x: x[0])
+
+    m = re.search(r"/(?:video|photo)/(\d{6,})", url) or re.search(r"(\d{15,})", url)
+    vid = m.group(1) if m else "video"
+    out = unique_path(os.path.join(out_dir, f"{safe_name(title, vid)} [{vid}].mp4"))
+    last_err = None
+    for _, link in cands[:3]:
+        for target in (link, _snapcdn_origin(link)):     # proxy trước, CDN gốc sau
+            if not target:
+                continue
+            try:
+                stream_download(session, target, out,
+                                headers={"User-Agent": UA_DESKTOP,
+                                         "Referer": "https://savetik.co/"},
+                                on_progress=on_progress, timeout=120)
+                return _finish(out, title or vid, url, "savetik")
+            except Exception as e:
+                last_err = e
+    raise RuntimeError(f"tải link savetik thất bại: {clean_error(last_err)}")

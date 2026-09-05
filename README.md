@@ -58,6 +58,9 @@ Chọn ở ô **Cookies từ**:
 App kiểm tra cookies ngay khi bấm tải và báo lý do cụ thể nếu không lấy được —
 không để chạy hết cả mẻ mới biết hỏng.
 
+**Douyin không cần cookies** (từ 1.2.0): nguồn `savetik` chạy được mà không cần
+phiên đăng nhập. Cookies chỉ cần cho TikTok quảng cáo và video riêng tư.
+
 ## 4. Vì sao bản local tải được video quảng cáo còn bản web thì không
 
 | | Web (Hugging Face Space) | Tool local |
@@ -76,8 +79,8 @@ Tất cả đều là gọi HTTP thuần (kèm cookies nếu có) — **không m
 | Loại link | Thứ tự thử |
 |---|---|
 | `.mp4` / `.m3u8` thẳng | tải luôn |
-| Douyin | iesdouyin (không cần cookies) → yt-dlp → quét trang |
-| TikTok | yt-dlp (cookies + giả lập TLS) → **API tiktok (cookies)** → tikwm → ssstik |
+| Douyin | **savetik** (không cần cookies) → API douyin (cookies) → iesdouyin → yt-dlp → quét trang |
+| TikTok | yt-dlp (cookies + giả lập TLS) → API tiktok (cookies) → tikwm → **savetik** → ssstik |
 | Trang quảng cáo (ads.tiktok, oceanengine…) | quét trang → API tiktok → yt-dlp generic |
 | Còn lại | yt-dlp → yt-dlp `best` → generic → quét trang |
 
@@ -117,6 +120,7 @@ không đọc phiên đang chạy. Việc còn lại có thể ảnh hưởng m�
 | YouTube báo "Sign in to confirm you're not a bot" | chọn nguồn cookies có đăng nhập YouTube (mục 3) |
 | Trình duyệt không thấy luồng video | tắt "chạy ẩn", tự bấm play/đăng nhập trong cửa sổ hiện ra rồi chạy lại |
 | Link cũ tự nhiên hỏng | `pip install -U yt-dlp` (site đổi liên tục) |
+| Douyin báo "không có link video" | trang share iesdouyin đã bị Douyin rút ruột (2026) — bản 1.2.0 trở lên đi đường savetik, cập nhật tool là chạy |
 | macOS: để license.key cạnh .app mà vẫn báo chưa có key | App Translocation — kéo app vào Applications, hoặc `xattr -dr com.apple.quarantine TNT_Downloader.app`, hoặc đặt key vào `~/Library/Application Support/TNT/` (xem mục 8) |
 
 ## 7. Cấu trúc
@@ -127,7 +131,7 @@ tnt_downloader/
   cli.py               bản dòng lệnh
   core/
     engine.py          điều phối: chọn nguồn, tải song song
-    extractors.py      tikwm · ssstik · iesdouyin · quét trang · link CDN thẳng
+    extractors.py      savetik · tikwm · ssstik · API tiktok/douyin · quét trang · link CDN
     sniffer.py         mở Edge/Chrome thật, bắt luồng video (cho link quảng cáo)
     cookies.py         nguồn cookies: hồ sơ TNT · trình duyệt máy · file cookies.txt
     utils.py           ffmpeg/ffprobe, mở trình duyệt, kiểm tra file video, cấu hình
