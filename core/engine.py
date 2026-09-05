@@ -14,7 +14,7 @@ khi người dùng tự bật (`browser_fallback`) — dùng cho vài link khó 
 
 Thứ tự thử nguồn (dừng ở nguồn đầu tiên ra được video thật):
   link .mp4 thẳng   → tải luôn
-  douyin            → savetik → API douyin (cookies) → iesdouyin → yt-dlp → quét trang
+  douyin            → savetik (chỉ hướng này, thử lại 3 lượt)
   tiktok            → yt-dlp → API tiktok (cookies) → tikwm → savetik → ssstik
   trang quảng cáo   → quét trang → API tiktok → yt-dlp generic
   còn lại           → yt-dlp → yt-dlp "best" → generic → quét trang
@@ -328,13 +328,12 @@ def download_one(url: str, opts: Options, on_progress=None, on_log=None) -> Resu
     if source == "direct":
         steps.append(("link trực tiếp", lambda: ex.direct_media(url, opts.out_dir, sess, on_progress)))
     elif source == "douyin":
-        steps += [
-            ("savetik", lambda: ex.savetik(url, opts.out_dir, sess, on_progress)),
-            ("API douyin", lambda: ex.douyin_web_api(url, opts.out_dir, sess, on_progress)),
-            ("douyin (iesdouyin)", lambda: ex.douyin_share(url, opts.out_dir, sess_m, on_progress)),
-            ("yt-dlp", lambda: _ydl_attempt(url, opts, source, on_progress=on_progress)),
-            ("quét trang", lambda: ex.scrape_page(url, opts.out_dir, sess, on_progress)),
-        ]
+        # CHỈ MỘT HƯỚNG: savetik. Douyin đã rút dữ liệu khỏi trang share và khoá
+        # API bằng ArgusSecurityPlugin, nên mọi cách khác chỉ tổ chậm rồi cũng lỗi.
+        # Bù lại, thử LẠI chính hướng này vài lượt cho chắc ăn.
+        steps += [(f"savetik (lượt {i + 1})",
+                   lambda: ex.savetik(url, opts.out_dir, sess, on_progress))
+                  for i in range(3)]
     elif source == "tiktok":
         steps += [
             ("yt-dlp", lambda: _ydl_attempt(url, opts, source, on_progress=on_progress)),

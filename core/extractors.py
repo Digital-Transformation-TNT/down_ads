@@ -17,6 +17,7 @@ import json
 import os
 import re
 import tempfile
+import threading
 import time
 from typing import Callable
 from urllib.parse import urljoin
@@ -143,60 +144,6 @@ def direct_media(url: str, out_dir: str, session: requests.Session,
     else:
         stream_download(session, url, path, on_progress=on_progress, timeout=120)
     return _finish(path, base, url, "direct")
-
-
-# ───────────────────────── 2. Douyin (share JSON) ─────────────────────────
-def douyin_share(url: str, out_dir: str, session: requests.Session,
-                 on_progress: Progress = None) -> dict:
-    """Bóc Douyin qua trang chia sẻ iesdouyin — KHÔNG cần cookies.
-
-    Extractor Douyin của yt-dlp nay đòi cookies "tươi"; cách này lấy JSON
-    `_ROUTER_DATA` trong trang mobile rồi tải thẳng, đổi 'playwm' -> 'play'
-    để lấy bản KHÔNG watermark.
-    """
-    m = re.search(r"/video/(\d+)", url) or re.search(r"modal_id=(\d+)", url)
-    if not m:
-        raise RuntimeError("không tìm được id video douyin")
-    vid = m.group(1)
-    html = session.get(f"https://www.iesdouyin.com/share/video/{vid}/",
-                       headers={"User-Agent": UA_MOBILE}, timeout=25).text
-    mm = re.search(r"window\._ROUTER_DATA\s*=\s*(\{.*?\})\s*</script>", html, re.S)
-    if not mm:
-        raise RuntimeError("không đọc được dữ liệu trang share douyin")
-    data = json.loads(mm.group(1))
-
-    urls: list[str] = []
-    title = {"v": ""}
-
-    def walk(o):
-        if isinstance(o, dict):
-            pa = o.get("play_addr")
-            if isinstance(pa, dict):
-                urls.extend(pa.get("url_list", []))
-            if not title["v"] and isinstance(o.get("desc"), str):
-                title["v"] = o["desc"]
-            for v in o.values():
-                walk(v)
-        elif isinstance(o, list):
-            for v in o:
-                walk(v)
-
-    walk(data)
-    play = [u if u.startswith("http") else "https:" + u for u in urls]
-    if not play:
-        raise RuntimeError("không có link video (có thể là bài ảnh/slideshow)")
-    ttl = (title["v"] or vid).strip()
-    path = unique_path(os.path.join(out_dir, f"{safe_name(ttl, vid)} [{vid}].mp4"))
-    last = None
-    for src in play[:3]:                       # url_list là nhiều CDN của cùng 1 video
-        try:
-            stream_download(session, src.replace("playwm", "play"), path,
-                            headers={"User-Agent": UA_MOBILE},
-                            on_progress=on_progress, timeout=120)
-            return _finish(path, ttl, url, "douyin-share")
-        except Exception as e:
-            last = e
-    raise RuntimeError(f"tải douyin thất bại: {clean_error(last)}")
 
 
 # ───────────────────────── 3. TikTok qua tikwm ─────────────────────────
@@ -434,82 +381,21 @@ def tiktok_web_api(url: str, out_dir: str, session: requests.Session,
     raise RuntimeError(f"tải link từ API tiktok thất bại: {clean_error(last)}")
 
 
-# ───────────── 7. API web nội bộ của Douyin (chạy bằng cookies) ─────────────
-_DY_API = "https://www.douyin.com/aweme/v1/web/aweme/detail/"
-
-
-def douyin_web_api(url: str, out_dir: str, session: requests.Session,
-                   on_progress: Progress = None) -> dict:
-    """Gọi thẳng API mà trang douyin.com dùng — KHÔNG mở trình duyệt.
-
-    Từ 2026 Douyin bỏ hẳn dữ liệu video khỏi trang share iesdouyin (chỉ còn
-    metadata trang), nên cách bóc HTML cũ chết. API này là đường còn lại, nhưng
-    có "ArgusSecurityPlugin" chặn request thiếu cookies của trình duyệt thật.
-
-    Hai điều đo được khi thử nghiệm, quyết định cách viết hàm này:
-    1. Cookies douyin trong hồ sơ trình duyệt dùng lại được nhiều lần, kể cả
-       cookies lấy từ trước đó khá lâu — không cần lấy mới mỗi lần tải.
-    2. Server chặn NGẪU NHIÊN, xen kẽ 403/200 ngay trong cùng một phiên. Nên
-       gặp 403 thì cứ thử lại, đừng vội bỏ sang nguồn khác.
-    """
-    m = (re.search(r"/video/(\d+)", url) or re.search(r"modal_id=(\d+)", url)
-         or re.search(r"(\d{15,})", url))
-    if not m:
-        raise RuntimeError("không tìm được id video douyin")
-    vid = m.group(1)
-    params = {"aweme_id": vid, "device_platform": "webapp", "aid": "6383",
-              "channel": "channel_pc_web", "pc_client_type": "1",
-              "version_code": "190500", "version_name": "19.5.0",
-              "cookie_enabled": "true", "platform": "PC"}
-    headers = {"User-Agent": UA_DESKTOP,
-               "Referer": f"https://www.douyin.com/video/{vid}",
-               "Accept": "application/json, text/plain, */*"}
-
-    detail = None
-    last = ""
-    for att in range(5):                 # chặn ngẫu nhiên -> kiên nhẫn thử lại
-        try:
-            r = session.get(_DY_API, params=params, timeout=25, headers=headers)
-            if r.status_code == 200 and len(r.text) > 500:
-                detail = (r.json() or {}).get("aweme_detail")
-                if detail:
-                    break
-            last = f"HTTP {r.status_code}: {r.text[:60].strip()}"
-        except Exception as e:
-            last = clean_error(e)
-        time.sleep(1.0 + 0.8 * att)
-    if not detail:
-        raise RuntimeError(
-            f"API douyin chặn ({last}). Cần cookies douyin: chọn Cookies = "
-            "“Trình duyệt TNT” và ghé douyin.com một lần bằng nút “Mở trình duyệt”.")
-
-    v = detail.get("video") or {}
-    urls: list[str] = list((v.get("play_addr") or {}).get("url_list") or [])
-    for b in (v.get("bit_rate") or []):          # nhiều mức nét, lấy hết rồi thử lần lượt
-        urls += ((b.get("play_addr") or {}).get("url_list") or [])
-    for key in ("play_addr_h264", "play_addr_265", "download_addr"):
-        urls += ((v.get(key) or {}).get("url_list") or [])
-    urls = [u for u in dict.fromkeys(urls) if u]
-    if not urls:
-        raise RuntimeError("API douyin không trả link phát (có thể là bài ảnh)")
-
-    title = (detail.get("desc") or "").strip()
-    out = unique_path(os.path.join(out_dir, f"{safe_name(title, vid)} [{vid}].mp4"))
-    last_err = None
-    for u in urls[:5]:
-        try:
-            stream_download(session, u, out,
-                            headers={"User-Agent": UA_DESKTOP,
-                                     "Referer": "https://www.douyin.com/"},
-                            on_progress=on_progress, timeout=120)
-            return _finish(out, title or vid, url, "douyin-api")
-        except Exception as e:
-            last_err = e
-    raise RuntimeError(f"tải link từ API douyin thất bại: {clean_error(last_err)}")
-
-
 # ──────── 8. savetik / snapcdn — kiểu snaptik, KHÔNG cần cookies ────────
 _SAVETIK_HOME = "https://savetik.co/vi"
+_SAVETIK_GAP = 2.5                  # giây tối thiểu giữa 2 lần hỏi savetik
+_SAVETIK_LOCK = threading.Lock()
+_SAVETIK_LAST = 0.0
+
+
+def _savetik_wait() -> None:
+    """Giữ nhịp hỏi savetik cho TOÀN BỘ các luồng tải (đo được: nhanh hơn là 429)."""
+    global _SAVETIK_LAST
+    with _SAVETIK_LOCK:
+        wait = _SAVETIK_GAP - (time.time() - _SAVETIK_LAST)
+        if wait > 0:
+            time.sleep(wait)
+        _SAVETIK_LAST = time.time()
 _SAVETIK_API = "https://savetik.co/api/ajaxSearch"
 _SNAPCDN_RE = re.compile(r'<a[^>]+href="(https://dl\.snapcdn\.app/get\?token=[^"]+)"[^>]*>(.{0,80}?)</a>',
                          re.S | re.I)
@@ -549,10 +435,15 @@ def savetik(url: str, out_dir: str, session: requests.Session,
 
     data = None
     last = ""
-    for att in range(3):
+    for att in range(5):
+        _savetik_wait()
         try:
             r = session.post(_SAVETIK_API, data={"q": url, "lang": "vi"},
                              headers=hdr, timeout=30)
+            if r.status_code == 429:        # quá nhịp -> nghỉ dài rồi thử lại
+                last = "savetik giới hạn tần suất (429)"
+                time.sleep(4.0 * (att + 1))
+                continue
             r.raise_for_status()
             j = r.json()
             if j.get("status") == "ok" and j.get("data"):
@@ -561,7 +452,7 @@ def savetik(url: str, out_dir: str, session: requests.Session,
             last = str(j.get("mess") or j.get("status") or "")[:80]
         except Exception as e:
             last = clean_error(e)
-        time.sleep(1.0 + att)
+        time.sleep(1.5 * (att + 1))
     if not data:
         raise RuntimeError(f"savetik không trả dữ liệu ({last})")
 

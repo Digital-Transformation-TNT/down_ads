@@ -58,8 +58,13 @@ Chọn ở ô **Cookies từ**:
 App kiểm tra cookies ngay khi bấm tải và báo lý do cụ thể nếu không lấy được —
 không để chạy hết cả mẻ mới biết hỏng.
 
-**Douyin không cần cookies** (từ 1.2.0): nguồn `savetik` chạy được mà không cần
-phiên đăng nhập. Cookies chỉ cần cho TikTok quảng cáo và video riêng tư.
+**Douyin không cần cookies**: đi qua `savetik`, không cần phiên đăng nhập.
+Cookies chỉ cần cho TikTok quảng cáo và video riêng tư.
+
+> Douyin bị giới hạn tần suất: đo được savetik.co chỉ chịu ~**1 lượt hỏi / 2 giây**,
+> gọi dồn là 429 hàng loạt. Tool tự giữ nhịp 2,5s cho *toàn bộ* các luồng tải nên
+> không dính, đổi lại mỗi link Douyin tốn ~3 giây phần bóc link (300 link ≈ 16 phút).
+> Phần tải file vẫn chạy song song bình thường.
 
 ## 4. Vì sao bản local tải được video quảng cáo còn bản web thì không
 
@@ -79,7 +84,7 @@ Tất cả đều là gọi HTTP thuần (kèm cookies nếu có) — **không m
 | Loại link | Thứ tự thử |
 |---|---|
 | `.mp4` / `.m3u8` thẳng | tải luôn |
-| Douyin | **savetik** (không cần cookies) → API douyin (cookies) → iesdouyin → yt-dlp → quét trang |
+| Douyin | **savetik** — chỉ một hướng, thử lại 3 lượt (không cần cookies) |
 | TikTok | yt-dlp (cookies + giả lập TLS) → API tiktok (cookies) → tikwm → **savetik** → ssstik |
 | Trang quảng cáo (ads.tiktok, oceanengine…) | quét trang → API tiktok → yt-dlp generic |
 | Còn lại | yt-dlp → yt-dlp `best` → generic → quét trang |
