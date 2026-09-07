@@ -14,6 +14,7 @@ from __future__ import annotations
 import os
 import sys
 import threading
+import time
 
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import QFont
@@ -31,10 +32,17 @@ from core.engine import (Options, Result, detect_source, download_many,
                          parse_links, resolve_cookies)
 from core.utils import (BROWSER_PROFILE_DIR, human_size, launch_persistent,
                         load_config, open_folder, save_config)
+import tnt_track
+from tnt_feedback import FeedbackBar
 from tnt_license import check_license
 
 # Tên tool trong license (phải khớp danh sách --tools lúc cấp license.key).
 TOOL_NAME = "TNT_Downloader"
+
+# Khoá tool trong nhật ký sử dụng (tab "Quản lý thời lượng" của webtool).
+# ĐỂ RIÊNG, không dùng chung khoá với tool nào bên web: gộp vào thì bảng "Chi
+# tiết theo tool" cộng chung số của hai bản, không còn biết bản nào đang chạy tốt.
+FEATURE = "down_ads"
 
 # --- Bộ màu thương hiệu TNT GROUP (đồng bộ với các tool khác) ---
 MAROON = "#3B0000"
@@ -119,6 +127,10 @@ class MainWindow(QMainWindow):
         self._rows: list[int] = []
         self._build_ui()
         self._load_cfg()
+        # Bắt đầu theo dõi MỘT VIỆC. Mỗi mẻ tải xong là một việc; bấm tải mẻ
+        # tiếp theo thì tnt_track tự mở việc mới.
+        self._job_t0 = 0.0
+        tnt_track.feature_open()
 
     # ────────────────────────────── giao diện ──────────────────────────────
     def _build_ui(self):
@@ -252,6 +264,10 @@ class MainWindow(QMainWindow):
         run_row.addWidget(self.pb, 4)
         root.addLayout(run_row)
 
+        # Thanh 👍/👎 — ẩn cho tới khi mẻ tải ra được file (xem on_all_done).
+        self.fb = FeedbackBar(accent=ORANGE)
+        root.addWidget(self.fb)
+
         # ── bảng + log ──
         split = QSplitter(Qt.Vertical)
         self.tbl = QTableWidget(0, len(COLS))
@@ -351,6 +367,7 @@ class MainWindow(QMainWindow):
             self._set(i, 6, "—")
         self.lbl_count.setText(f"{len(self.urls)} link")
         self.log_line(f"Đã nhận {len(self.urls)} link.")
+        tnt_track.step("paste_links", "prepare", {"count": len(self.urls)})
         return self.urls
 
     def _set(self, row: int, col: int, text: str):
@@ -410,10 +427,16 @@ class MainWindow(QMainWindow):
         self.log_line(f"── Bắt đầu tải {len(urls)} link → {out}"
                       + ("" if opts.browser_fallback else "  (chỉ dùng API, không mở trình duyệt)"))
 
+        tnt_track.run_click({"phase": "download", "links": len(urls)})
         self._start_batch(list(range(len(urls))), opts)
 
     def _start_batch(self, rows: list[int], opts: Options):
         """Chạy một mẻ tải cho các DÒNG `rows` trên bảng (cả bảng, hoặc chỉ dòng lỗi)."""
+        # Mốc đo "máy chạy thật": từ lúc mẻ khởi động tới lúc allDone. Worker chạy
+        # ngay, không phải xếp hàng, nên khoảng này KHÔNG lẫn thời gian chờ.
+        self._job_t0 = time.time()
+        self.fb.reset()
+        tnt_track.job_started("download", links=len(rows))
         self._rows = rows
         self.pb.setValue(0)
         self.done_count = 0
@@ -469,6 +492,14 @@ class MainWindow(QMainWindow):
     def on_all_done(self, _res):
         ok = sum(1 for r in self.results if r.ok)
         failed = [i for i, r in enumerate(self.results) if not r.ok]
+        if self._job_t0:
+            tnt_track.job_done("download", int((time.time() - self._job_t0) * 1000),
+                               ok=bool(ok), links=len(self._rows), failed=len(failed))
+            self._job_t0 = 0.0
+        # Có file tải về = việc này CÓ SẢN PHẨM (chỉ số B1 + tử số của A3).
+        if ok:
+            tnt_track.output("mp4", {"count": ok})
+            self.fb.ask()          # hỏng sạch thì KHÔNG hỏi — xem tnt_feedback.py
         self.btn_start.setEnabled(True)
         self.btn_stop.setEnabled(False)
         self.pb.setValue(100)
@@ -492,6 +523,7 @@ class MainWindow(QMainWindow):
         opts.browser_fallback = True
         opts.concurrency = 1          # 1 cửa sổ trình duyệt tại một thời điểm
         self.log_line(f"── Chạy lại {len(rows)} link lỗi bằng trình duyệt (mỗi lần 1 link)")
+        tnt_track.retry("regenerate", {"phase": "download", "links": len(rows)})
         self._start_batch(rows, opts)
 
     def on_row_open(self):
@@ -501,6 +533,9 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, e):
         self._save_cfg()
+        # App desktop đóng là tiến trình chết hẳn — không chốt ở đây thì dòng
+        # "bỏ dở" mất, phễu điểm dừng trên dashboard rỗng dần.
+        tnt_track.shutdown()
         if self.worker and self.worker.isRunning():
             self.worker.cancel.set()
             self.worker.wait(3000)
@@ -513,7 +548,9 @@ def main():
     # Kiểm license TRƯỚC khi mở cửa sổ chính. Sai/thiếu license -> tnt_license tự
     # hiện hộp thoại kèm MÃ MÁY (có nút Copy) rồi thoát.
     # QApplication phải tạo trước để hộp thoại đó dùng được giao diện Qt.
-    check_license(TOOL_NAME)
+    info = check_license(TOOL_NAME)
+    # Chỉ ĐỌC tên nhân viên đã ký sẵn trong license — không đụng gì cơ chế license.
+    tnt_track.init(FEATURE, license_info=info, tool=TOOL_NAME)
     w = MainWindow()
     w.show()
     sys.exit(app.exec())

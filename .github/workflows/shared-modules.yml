@@ -1,0 +1,94 @@
+name: Đồng bộ module dùng chung
+
+# VÌ SAO CÓ FILE NÀY
+#
+# `tnt_license.py` và `tnt_track.py` không nằm ở một chỗ rồi được import chung —
+# mỗi tool giữ MỘT BẢN SAO ở gốc repo để PyInstaller đóng thẳng vào exe. Cách này
+# đơn giản, nhưng đã có tiền lệ hỏng: bản vá App Translocation cho macOS được sửa
+# thẳng vào bản của down_ads và remove_subtitle mà không quay về license_kit ->
+# ba bản `tnt_license.py` lệch nhau ~90 dòng, và bộ đi CẤP license lại cũ hơn bản
+# mà app dùng để KIỂM license.
+#
+# Workflow này bắt đúng tình huống đó: mỗi repo tự so bản của mình với hai repo
+# anh em. Sửa một chỗ mà quên hai chỗ kia là CI đỏ ngay.
+#
+# Cả ba repo tool đều PUBLIC nên đọc chéo bằng raw.githubusercontent được, KHÔNG
+# cần cấp secret/token cho repo nào. (license_kit đang private nên không so ở đây
+# — đồng bộ bản trong đó bằng tay khi phát hành.)
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    # Repo không ai đẩy code thì CI không chạy, lệch nằm im không ai biết.
+    # Quét lại mỗi thứ Hai 8h sáng giờ VN (01:00 UTC) cho chắc.
+    - cron: "0 1 * * 1"
+
+jobs:
+  compare:
+    name: So khớp bản sao giữa 3 tool
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: So SHA-256 với hai repo anh em
+        run: |
+          set -u
+          ORG="Digital-Transformation-TNT"
+          SELF="${{ github.event.repository.name }}"
+          PEERS="down_ads remove_subtitle listing_image"
+
+          # tnt_track.py  -> CHẶN (đang giống hệt nhau, giữ cho bằng được).
+          # tnt_license.py -> CẢNH BÁO (đã lệch sẵn từ trước; bật chặn ngay thì
+          #                   CI đỏ cả ba repo vì lỗi cũ). Sau khi gộp xong ba
+          #                   bản, chuyển nó xuống dòng BLOCKING là chặn luôn.
+          BLOCKING="tnt_track.py tnt_feedback.py"
+          WARNING="tnt_license.py"
+
+          status=0
+          for f in $BLOCKING $WARNING; do
+            if [ ! -f "$f" ]; then
+              echo "::notice::Repo này không có $f — bỏ qua."
+              continue
+            fi
+            mine=$(sha256sum "$f" | cut -d' ' -f1)
+            echo ""
+            echo "── $f  (bản repo này: ${mine:0:12}…)"
+
+            for p in $PEERS; do
+              [ "$p" = "$SELF" ] && continue
+              url="https://raw.githubusercontent.com/$ORG/$p/main/$f"
+              if ! curl -fsSL "$url" -o /tmp/peer_$f 2>/dev/null; then
+                echo "   • $p: không tải được (chưa có file / repo đổi sang private) — bỏ qua"
+                continue
+              fi
+              theirs=$(sha256sum /tmp/peer_$f | cut -d' ' -f1)
+              if [ "$mine" = "$theirs" ]; then
+                echo "   ✓ khớp $p"
+                continue
+              fi
+
+              echo "   ✗ LỆCH so với $p (${theirs:0:12}…)"
+              echo "     ---- khác biệt (bản $p  →  bản $SELF) ----"
+              diff -u "/tmp/peer_$f" "$f" | head -60 || true
+
+              case " $BLOCKING " in
+                *" $f "*)
+                  status=1
+                  echo "::error file=$f::$f lệch giữa $SELF và $p. Sửa file dùng chung thì phải cập nhật CẢ BA repo trong cùng đợt (và cả bản trong license_kit)."
+                  ;;
+                *)
+                  echo "::warning file=$f::$f lệch giữa $SELF và $p — lỗi cũ, chưa chặn. Gộp ba bản rồi chuyển $f sang danh sách BLOCKING."
+                  ;;
+              esac
+            done
+          done
+
+          echo ""
+          if [ "$status" -ne 0 ]; then
+            echo "KẾT LUẬN: có module dùng chung bị lệch — xem chi tiết ở trên."
+          else
+            echo "KẾT LUẬN: các module dùng chung đã đồng bộ."
+          fi
+          exit $status
