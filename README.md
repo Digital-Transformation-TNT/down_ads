@@ -87,8 +87,8 @@ Tất cả đều là gọi HTTP thuần (kèm cookies nếu có) — **không m
 | Loại link | Thứ tự thử |
 |---|---|
 | `.mp4` / `.m3u8` thẳng | tải luôn |
-| Douyin | **savetik** — chỉ một hướng, thử lại 3 lượt (không cần cookies) |
-| TikTok | yt-dlp (cookies + giả lập TLS) → API tiktok (cookies) → tikwm → **savetik** → ssstik |
+| Douyin | **site tải video**: savetik → tiktokio → snapsave → lovetik (không cần cookies) |
+| TikTok | yt-dlp (cookies + giả lập TLS) → API tiktok (cookies) → tikwm → **site tải video** → ssstik |
 | Trang quảng cáo (ads.tiktok, oceanengine…) | quét trang → API tiktok → yt-dlp generic |
 | Còn lại | yt-dlp → yt-dlp `best` → generic → quét trang |
 
@@ -116,6 +116,22 @@ không đọc phiên đang chạy. Việc còn lại có thể ảnh hưởng m�
 | CPU | chỉ nặng khi gặp bài **ảnh/slideshow** (phải ghép ảnh + nhạc bằng ffmpeg). Video thường chỉ là tải file | — |
 | Cửa sổ bật lên | mặc định KHÔNG bật gì: không mở trình duyệt, cũng không tự mở thư mục khi xong | bật lại bằng ô **"Mở thư mục khi tải xong"** |
 | macOS lần đầu | có thể hiện hộp Keychain xin quyền đọc cookies | bấm **Always Allow**, các lần sau im lặng |
+
+### Vì sao site đổi giao diện không còn làm chết tool
+
+Ba lần hỏng trước đều do **bóc theo cấu trúc trang**: Douyin bỏ `_ROUTER_DATA` là
+chết; nhãn "MP4 HD" của savetik trỏ nhầm file 576p là tải về bản mờ. Nên `webdl.py`
+làm khác:
+
+| Nguyên tắc | Cụ thể |
+|---|---|
+| Không dò theo thẻ/class/nhãn | Quét **mọi URL trông giống link media** trong phản hồi — HTML, JSON, chuỗi escape đều nhận. Site đổi giao diện vẫn chạy |
+| Không tin nhãn chất lượng | Đo **dung lượng thật** rồi lấy file to nhất |
+| Không phụ thuộc một site | Đi lần lượt nhiều site; thêm site mới chỉ là thêm một dòng vào `SITES` |
+| Không phụ thuộc proxy của site | Link `dl.snapcdn.app` chứa sẵn link CDN gốc trong token — proxy hỏng thì tải thẳng |
+
+Đã kiểm chứng bằng cách cho savetik "chết hẳn": tool tự chuyển sang tiktokio và
+vẫn ra video.
 
 ## 6. Xử lý khi tải lỗi
 
@@ -145,6 +161,7 @@ tnt_downloader/
     cookies.py         nguồn cookies: hồ sơ TNT · trình duyệt máy · file cookies.txt
     utils.py           ffmpeg/ffprobe, mở trình duyệt, kiểm tra file video, cấu hình
     net.py             vượt chặn DNS của nhà mạng (DNS-over-HTTPS + xoay IP)
+    webdl.py           hỏi các site tải video bằng parser chung (chống site đổi giao diện)
   tnt_license.py       lớp bảo mật dùng chung (copy từ tnt_license_kit)
   tnt_downloader.spec  build .exe bằng PyInstaller (nhúng ffmpeg, mượn Edge/Chrome)
 ```

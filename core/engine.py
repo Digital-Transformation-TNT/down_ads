@@ -14,8 +14,8 @@ khi người dùng tự bật (`browser_fallback`) — dùng cho vài link khó 
 
 Thứ tự thử nguồn (dừng ở nguồn đầu tiên ra được video thật):
   link .mp4 thẳng   → tải luôn
-  douyin            → savetik (chỉ hướng này, thử lại 3 lượt)
-  tiktok            → yt-dlp → API tiktok (cookies) → tikwm → savetik → ssstik
+  douyin            → site tải video (savetik → tiktokio → …, parser chung)
+  tiktok            → yt-dlp → API tiktok (cookies) → tikwm → site tải video → ssstik
   trang quảng cáo   → quét trang → API tiktok → yt-dlp generic
   còn lại           → yt-dlp → yt-dlp "best" → generic → quét trang
   (+ "trình duyệt bắt luồng" nối vào cuối mọi chuỗi NẾU người dùng bật)
@@ -32,6 +32,7 @@ from typing import Callable
 
 from . import extractors as ex
 from . import sniffer
+from . import webdl
 from .cookies import cookiefile
 from .cookies import last_error as last_cookie_error
 from .utils import URL_RE, clean_error, has_video_stream, probe_duration
@@ -328,18 +329,21 @@ def download_one(url: str, opts: Options, on_progress=None, on_log=None) -> Resu
     if source == "direct":
         steps.append(("link trực tiếp", lambda: ex.direct_media(url, opts.out_dir, sess, on_progress)))
     elif source == "douyin":
-        # CHỈ MỘT HƯỚNG: savetik. Douyin đã rút dữ liệu khỏi trang share và khoá
-        # API bằng ArgusSecurityPlugin, nên mọi cách khác chỉ tổ chậm rồi cũng lỗi.
-        # Bù lại, thử LẠI chính hướng này vài lượt cho chắc ăn.
-        steps += [(f"savetik (lượt {i + 1})",
-                   lambda: ex.savetik(url, opts.out_dir, sess, on_progress))
-                  for i in range(3)]
+        # MỘT CÁCH duy nhất — hỏi các site tải video — nhưng chạy trên NHIỀU site
+        # với parser chung, nên site đổi giao diện hay bị chặn vẫn còn đường.
+        # (Douyin đã rút dữ liệu khỏi trang share và khoá API bằng
+        #  ArgusSecurityPlugin/UIFID nên không còn cách bóc trực tiếp nào sống.)
+        steps += [(f"site tải video (lượt {i + 1})",
+                   lambda: webdl.download_via_sites(url, opts.out_dir, sess,
+                                                    on_progress, on_log))
+                  for i in range(2)]
     elif source == "tiktok":
         steps += [
             ("yt-dlp", lambda: _ydl_attempt(url, opts, source, on_progress=on_progress)),
             ("API tiktok", lambda: ex.tiktok_web_api(url, opts.out_dir, sess, on_progress)),
             ("tikwm", lambda: ex.tikwm(url, opts.out_dir, sess_m, on_progress)),
-            ("savetik", lambda: ex.savetik(url, opts.out_dir, sess, on_progress)),
+            ("site tải video", lambda: webdl.download_via_sites(url, opts.out_dir, sess,
+                                                                on_progress, on_log)),
             ("ssstik", lambda: ex.ssstik(url, opts.out_dir, sess, on_progress)),
         ]
     elif source == "ads":
