@@ -140,6 +140,23 @@ làm khác:
 Lưới cuối chỉ chạy khi cách nhanh không tìm được gì, nên đường bình thường không chậm đi
 (6 link vẫn 25 giây).
 
+### Cập nhật danh sách site mà KHÔNG cần build lại app
+
+Chỗ yếu cuối cùng còn lại là danh sách site: site đóng cửa hay đổi tên miền là chuyện
+thường. Để khỏi phải sửa code → build → gửi lại app cho từng người, danh sách có thể
+để ở một file JSON công khai:
+
+1. Copy [`sources.example.json`](sources.example.json) lên một **gist public** hoặc repo public.
+2. Điền URL raw vào `SOURCES_URL` trong [`core/sources.py`](core/sources.py)
+   (hoặc đặt biến môi trường `TNT_SOURCES_URL` để đổi nhanh, không cần build lại).
+3. Từ đó site nào chết chỉ cần sửa file JSON — mọi máy nhận trong vòng 6 tiếng
+   (hoặc ngay khi mở lại app).
+
+An toàn: file chỉ chứa **dữ liệu** (tên site, URL, nhịp hỏi), không phải mã. Tool không
+bao giờ chạy nội dung tải về, chỉ nhận đúng 4 khoá `name/home/api/gap` và bắt buộc
+`https`. File sai định dạng, hỏng mạng, hay chưa đặt URL → tự dùng danh sách nhúng sẵn,
+nên không bao giờ tệ hơn hiện tại. Đã test đủ 4 tình huống này.
+
 ## 6. Xử lý khi tải lỗi
 
 | Lỗi hay gặp | Cách xử lý |

@@ -1,0 +1,38 @@
+{
+  "_huong_dan": [
+    "File này là DANH SÁCH SITE tải video mà tool sẽ hỏi, theo thứ tự.",
+    "Đặt nó ở một nơi công khai (gist hoặc repo public), rồi điền URL raw vào",
+    "SOURCES_URL trong core/sources.py. Từ đó site nào chết chỉ cần sửa file này —",
+    "mọi máy nhận trong vòng 6 tiếng (hoặc ngay khi mở lại app), KHÔNG cần build lại.",
+    "",
+    "Chỉ 4 khoá được chấp nhận: name, home, api, gap. URL bắt buộc https.",
+    "gap = số giây tối thiểu giữa 2 lần hỏi cùng site (savetik chỉ chịu ~1 lượt/2s).",
+    "Mọi khoá lạ đều bị bỏ qua; file sai định dạng thì tool tự dùng danh sách nhúng sẵn."
+  ],
+  "sites": [
+    {
+      "name": "savetik",
+      "home": "https://savetik.co/vi",
+      "api": "https://savetik.co/api/ajaxSearch",
+      "gap": 2.5
+    },
+    {
+      "name": "tiktokio",
+      "home": "https://tiktokio.to/en",
+      "api": "https://tiktokio.to/api/ajaxSearch",
+      "gap": 1.5
+    },
+    {
+      "name": "snapsave",
+      "home": "https://snapsave.app/vn",
+      "api": "https://snapsave.app/action.php",
+      "gap": 1.5
+    },
+    {
+      "name": "lovetik",
+      "home": "https://lovetik.com/",
+      "api": "https://lovetik.com/api/ajax/search",
+      "gap": 1.5
+    }
+  ]
+}

@@ -29,6 +29,7 @@ from typing import Callable
 
 import requests
 
+from . import sources
 from .net import ensure_host
 from .utils import (UA_DESKTOP, clean_error, has_video_stream, probe_duration,
                     safe_name, unique_path)
@@ -38,7 +39,7 @@ Progress = Callable[[int, int], None] | None
 # ─────────────────────────── danh sách site ───────────────────────────
 # gap: nhịp tối thiểu giữa 2 lần hỏi CÙNG site (đo thực tế savetik chỉ chịu
 # ~1 request/2s, gọi dồn là 429 hàng loạt).
-SITES: list[dict] = [
+BUILTIN_SITES: list[dict] = [
     {"name": "savetik", "home": "https://savetik.co/vi",
      "api": "https://savetik.co/api/ajaxSearch", "gap": 2.5},
     {"name": "tiktokio", "home": "https://tiktokio.to/en",
@@ -48,6 +49,11 @@ SITES: list[dict] = [
     {"name": "lovetik", "home": "https://lovetik.com/",
      "api": "https://lovetik.com/api/ajax/search", "gap": 1.5},
 ]
+
+def get_sites() -> list[dict]:
+    """Danh sách site đang dùng — ưu tiên bản cấu hình từ xa, hỏng thì bản nhúng sẵn."""
+    return sources.load_sites(BUILTIN_SITES)
+
 
 # Parser CHUNG: link media của Douyin/TikTok hoặc link proxy của site tải video.
 # Không gắn với giao diện site nào nên site đổi HTML vẫn chạy.
@@ -253,7 +259,7 @@ def download_via_sites(url: str, out_dir: str, session: requests.Session,
     vid = m.group(1) if m else "video"
     errors: list[str] = []
 
-    for site in SITES:
+    for site in get_sites():
         try:
             links, title = _ask_site(site, ask, session)
         except Exception as e:
