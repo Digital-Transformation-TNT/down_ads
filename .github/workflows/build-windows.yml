@@ -1,0 +1,104 @@
+name: Build Windows app
+
+# Chạy thủ công trong tab Actions (Run workflow), hoặc khi đẩy tag v*.
+# Bản song sinh của build-macos.yml — cùng cách kiểm chứng, chỉ khác hệ điều hành.
+on:
+  workflow_dispatch:
+    inputs:
+      bundle_chromium:
+        description: "Nhúng luôn Chromium (+~685MB) — chỉ cần khi máy đích KHÔNG có Chrome/Edge"
+        type: boolean
+        default: false
+  push:
+    tags: ["v*"]
+
+jobs:
+  build:
+    name: Build .exe (windows-latest)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # Spec CẢNH BÁO rõ: đừng build bằng Python dùng chung — gói lạ có đăng ký
+      # hook PyInstaller sẽ tự chui vào bản phát hành (đã dính với `patchright`,
+      # +102 MB dù tool không hề import). Runner mỗi lần chạy là máy sạch, nhưng
+      # vẫn dựng venv riêng cho đúng quy trình ghi trong spec.
+      - name: Dựng venv sạch + cài thư viện
+        run: |
+          python -m venv .venv
+          .venv\Scripts\python -m pip install --upgrade pip
+          .venv\Scripts\python -m pip install -r requirements.txt pyinstaller
+
+      # Spec tìm ffmpeg ở vendor/ffmpeg/ trước, không có mới lùi về PATH. Tải sẵn
+      # bản static để bản phát hành luôn có ffmpeg, không phụ thuộc máy người dùng.
+      - name: Tải ffmpeg static cho Windows
+        run: |
+          New-Item -ItemType Directory -Force vendor\ffmpeg | Out-Null
+          $url = "https://github.com/BtbN/FFmpeg-Builds/releases/latest/download/ffmpeg-master-latest-win64-gpl.zip"
+          Invoke-WebRequest -Uri $url -OutFile ffmpeg.zip
+          Expand-Archive ffmpeg.zip -DestinationPath ffmpeg_tmp -Force
+          $bin = Get-ChildItem ffmpeg_tmp -Recurse -Filter ffmpeg.exe | Select-Object -First 1
+          Copy-Item $bin.FullName vendor\ffmpeg\ffmpeg.exe
+          & vendor\ffmpeg\ffmpeg.exe -version | Select-Object -First 1
+
+      - name: Nạp Chromium cho Playwright (chỉ khi được yêu cầu)
+        if: ${{ inputs.bundle_chromium }}
+        run: .venv\Scripts\python -m playwright install chromium
+
+      - name: Build .exe
+        run: |
+          if (Test-Path build) { Remove-Item -Recurse -Force build }
+          if (Test-Path dist)  { Remove-Item -Recurse -Force dist }
+          .venv\Scripts\python -m PyInstaller --noconfirm tnt_downloader.spec
+
+      # Smoke test GIỐNG bản macOS: chạy app THẬT. Không có license.key thì app
+      # ghi machine_id.txt RỒI mới hiện hộp thoại — có file đó nghĩa là app chạy
+      # được tới bước license, tức PySide6/cryptography/tnt_track/tnt_feedback
+      # đã vào gói đúng. Đây chính là bước bắt lỗi thiếu module.
+      - name: Smoke test — app THẬT khởi động được
+        run: |
+          $ErrorActionPreference = "Continue"
+          $dir = "dist\TNT_Downloader"
+          $exe = "$dir\TNT_Downloader.exe"
+          if (-not (Test-Path $exe)) { Write-Output "Khong thay $exe"; exit 1 }
+          Remove-Item "$dir\machine_id.txt" -ErrorAction SilentlyContinue
+          $env:QT_QPA_PLATFORM = "offscreen"
+          $p = Start-Process -FilePath $exe -PassThru `
+                 -RedirectStandardOutput smoke.log -RedirectStandardError smoke.err
+          for ($i = 0; $i -lt 90; $i++) {
+            if (Test-Path "$dir\machine_id.txt") { break }
+            if ($p.HasExited) { break }
+            Start-Sleep -Seconds 1
+          }
+          if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
+          Write-Output "----- app output -----"
+          Get-Content smoke.log, smoke.err -ErrorAction SilentlyContinue
+          Write-Output "----------------------"
+          $log = (Get-Content smoke.log, smoke.err -Raw -ErrorAction SilentlyContinue)
+          if ($log -match "No module named") {
+            Write-Output "THIEU MODULE trong bundle (xem log tren)."; exit 1
+          }
+          if (-not (Test-Path "$dir\machine_id.txt")) {
+            Write-Output "App KHONG khoi dong duoc toi buoc license."; exit 1
+          }
+          Write-Output "App khoi dong OK. Ma may cua runner:"
+          Get-Content "$dir\machine_id.txt"
+          Remove-Item "$dir\machine_id.txt" -Force
+
+      - name: Kiểm tra ffmpeg đã nằm trong gói
+        run: |
+          $ff = "dist\TNT_Downloader\_internal\ffmpeg\ffmpeg.exe"
+          if (-not (Test-Path $ff)) { $ff = "dist\TNT_Downloader\ffmpeg\ffmpeg.exe" }
+          if (-not (Test-Path $ff)) { Write-Output "Khong thay ffmpeg trong goi"; exit 1 }
+          & $ff -version | Select-Object -First 1
+
+      - name: Tải kết quả lên (artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: TNT_Downloader-windows
+          path: dist/TNT_Downloader
+          if-no-files-found: error
