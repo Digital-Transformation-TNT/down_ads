@@ -25,6 +25,7 @@ from urllib.parse import urljoin
 import requests
 
 from .cookies import load_into_session
+from .net import ensure_host
 from .utils import (UA_DESKTOP, UA_MOBILE, clean_error, has_video_stream,
                     probe_duration, run_ffmpeg, safe_name, unique_path)
 
@@ -428,17 +429,29 @@ def savetik(url: str, out_dir: str, session: requests.Session,
     """
     hdr = {"User-Agent": UA_DESKTOP, "Referer": _SAVETIK_HOME,
            "Origin": "https://savetik.co", "X-Requested-With": "XMLHttpRequest"}
+    # Nhà mạng VN có chặn savetik.co (DNS trả 127.0.0.1, và reset kết nối theo SNI
+    # kiểu chập chờn). Ghim IP thật lấy qua DNS-over-HTTPS trước khi gọi.
+    ensure_host("savetik.co")
+    ensure_host("dl.snapcdn.app")
     try:
         session.get(_SAVETIK_HOME, timeout=20, headers={"User-Agent": UA_DESKTOP})
     except Exception:
         pass                                   # không lấy được trang chủ vẫn thử API
+
+    # Douyin: hỏi bằng dạng link chia sẻ (savetik nhận chắc nhất). Link dạng
+    # douyin.com/video/<id> hay trang tìm kiếm ?modal_id=<id> đều quy về dạng này.
+    ask = url
+    if "douyin.com" in url and "iesdouyin" not in url:
+        mid = re.search(r"/video/(\d{6,})", url) or re.search(r"modal_id=(\d{6,})", url)
+        if mid:
+            ask = f"https://www.iesdouyin.com/share/video/{mid.group(1)}/"
 
     data = None
     last = ""
     for att in range(5):
         _savetik_wait()
         try:
-            r = session.post(_SAVETIK_API, data={"q": url, "lang": "vi"},
+            r = session.post(_SAVETIK_API, data={"q": ask, "lang": "vi"},
                              headers=hdr, timeout=30)
             if r.status_code == 429:        # quá nhịp -> nghỉ dài rồi thử lại
                 last = "savetik giới hạn tần suất (429)"

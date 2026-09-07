@@ -61,6 +61,9 @@ không để chạy hết cả mẻ mới biết hỏng.
 **Douyin không cần cookies**: đi qua `savetik`, không cần phiên đăng nhập.
 Cookies chỉ cần cho TikTok quảng cáo và video riêng tư.
 
+> Tool chấp nhận cả link trang tìm kiếm Douyin (`/jingxuan/search/…?modal_id=…`)
+> và `douyin.com/video/<id>` — đều tự quy về dạng link chia sẻ trước khi hỏi.
+>
 > Douyin bị giới hạn tần suất: đo được savetik.co chỉ chịu ~**1 lượt hỏi / 2 giây**,
 > gọi dồn là 429 hàng loạt. Tool tự giữ nhịp 2,5s cho *toàn bộ* các luồng tải nên
 > không dính, đổi lại mỗi link Douyin tốn ~3 giây phần bóc link (300 link ≈ 16 phút).
@@ -126,6 +129,7 @@ không đọc phiên đang chạy. Việc còn lại có thể ảnh hưởng m�
 | Trình duyệt không thấy luồng video | tắt "chạy ẩn", tự bấm play/đăng nhập trong cửa sổ hiện ra rồi chạy lại |
 | Link cũ tự nhiên hỏng | `pip install -U yt-dlp` (site đổi liên tục) |
 | Douyin báo "không có link video" | trang share iesdouyin đã bị Douyin rút ruột (2026) — bản 1.2.0 trở lên đi đường savetik, cập nhật tool là chạy |
+| Douyin lỗi "Failed to establish a new connection" | nhà mạng chặn `savetik.co` (DNS trả 127.0.0.1 + reset theo SNI) — từ 1.4.0 tool tự lấy IP thật qua DNS-over-HTTPS và xoay IP khi bị reset |
 | macOS: để license.key cạnh .app mà vẫn báo chưa có key | App Translocation — kéo app vào Applications, hoặc `xattr -dr com.apple.quarantine TNT_Downloader.app`, hoặc đặt key vào `~/Library/Application Support/TNT/` (xem mục 8) |
 
 ## 7. Cấu trúc
@@ -140,6 +144,7 @@ tnt_downloader/
     sniffer.py         mở Edge/Chrome thật, bắt luồng video (cho link quảng cáo)
     cookies.py         nguồn cookies: hồ sơ TNT · trình duyệt máy · file cookies.txt
     utils.py           ffmpeg/ffprobe, mở trình duyệt, kiểm tra file video, cấu hình
+    net.py             vượt chặn DNS của nhà mạng (DNS-over-HTTPS + xoay IP)
   tnt_license.py       lớp bảo mật dùng chung (copy từ tnt_license_kit)
   tnt_downloader.spec  build .exe bằng PyInstaller (nhúng ffmpeg, mượn Edge/Chrome)
 ```
