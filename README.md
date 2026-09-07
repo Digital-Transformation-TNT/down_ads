@@ -129,9 +129,16 @@ làm khác:
 | Không tin nhãn chất lượng | Đo **dung lượng thật** rồi lấy file to nhất |
 | Không phụ thuộc một site | Đi lần lượt nhiều site; thêm site mới chỉ là thêm một dòng vào `SITES` |
 | Không phụ thuộc proxy của site | Link `dl.snapcdn.app` chứa sẵn link CDN gốc trong token — proxy hỏng thì tải thẳng |
+| Không phụ thuộc cả tên miền CDN | Nếu không nhận ra link nào, tool quét **mọi URL** trong phản hồi rồi hỏi server `Content-Type` — cái nào là `video/*` thì lấy. ByteDance đổi sang CDN tên khác vẫn chạy |
 
-Đã kiểm chứng bằng cách cho savetik "chết hẳn": tool tự chuyển sang tiktokio và
-vẫn ra video.
+Đã kiểm chứng bằng hai kịch bản hỏng:
+
+- Cho savetik **chết hẳn** → tool tự chuyển sang tiktokio, vẫn ra video.
+- Cho **mọi tên miền CDN đã biết đều trượt** (giả lập ByteDance đổi CDN) → lưới cuối
+  dò theo `Content-Type` vẫn tìm đúng video, đúng chất lượng.
+
+Lưới cuối chỉ chạy khi cách nhanh không tìm được gì, nên đường bình thường không chậm đi
+(6 link vẫn 25 giây).
 
 ## 6. Xử lý khi tải lỗi
 

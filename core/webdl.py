@@ -64,6 +64,18 @@ MEDIA_RE = re.compile(
 # Link chỉ là nhạc/ảnh bìa — không phải video cần tải.
 SKIP_RE = re.compile(r"(music|/aweme/v1/play|cover|avatar|thumb|\.jpe?g|\.png|\.mp3)", re.I)
 
+# ── Lưới cuối: nhận diện video KHÔNG dựa vào tên miền ──
+# MEDIA_RE ở trên vẫn phải liệt kê tên miền CDN (zjcdn, douyinvod…) vì link Douyin
+# không có đuôi .mp4. Ngày ByteDance đổi sang CDN tên khác là regex đó trượt sạch.
+# Nên khi không khớp được gì, ta quét MỌI url trong phản hồi rồi HỎI SERVER xem cái
+# nào là video (Content-Type). Cách này không cần biết trước tên miền nào cả.
+ANY_URL_RE = re.compile(r"https?://[^\s\"'<>\\)]{10,2000}", re.I)
+STATIC_RE = re.compile(
+    r"\.(css|js|mjs|png|jpe?g|gif|svg|webp|ico|woff2?|ttf|eot|xml|txt)(\?|$)", re.I)
+NOISE_RE = re.compile(
+    r"(google|gstatic|doubleclick|facebook|twitter|cloudflare|jquery|bootstrap"
+    r"|fontawesome|analytics|adsbygoogle|recaptcha|sentry|cdnjs)", re.I)
+
 _LOCK = threading.Lock()
 _LAST: dict[str, float] = {}
 
@@ -95,6 +107,37 @@ def _snapcdn_origin(link: str) -> str:
         return json.loads(base64.urlsafe_b64decode(payload)).get("url") or ""
     except Exception:
         return ""
+
+
+def _sniff_video_urls(text: str, session: requests.Session,
+                      limit: int = 12) -> list[str]:
+    """Quét mọi url trong phản hồi rồi hỏi server cái nào là video.
+
+    Đây là lưới cuối cho tình huống CDN/site đổi tên miền: không đoán theo tên,
+    chỉ tải 1 byte đầu (Range) và xem Content-Type. Chỉ chạy khi cách nhanh phía
+    trên không tìm được gì, nên không làm chậm đường chạy bình thường.
+    """
+    seen: list[str] = []
+    for m in ANY_URL_RE.finditer(text):
+        u = _unescape(m.group(0)).rstrip("\"',);")
+        if (u in seen or STATIC_RE.search(u) or NOISE_RE.search(u)
+                or SKIP_RE.search(u)):
+            continue
+        seen.append(u)
+        if len(seen) >= 60:
+            break
+    found: list[str] = []
+    for u in seen[:limit]:
+        try:
+            with session.get(u, stream=True, timeout=15,
+                             headers={"User-Agent": UA_DESKTOP, "Range": "bytes=0-0"}) as r:
+                ctype = (r.headers.get("Content-Type") or "").lower()
+                clen = r.headers.get("Content-Range") or r.headers.get("Content-Length") or ""
+            if ctype.startswith("video/") or ("octet-stream" in ctype and clen):
+                found.append(u)
+        except Exception:
+            continue
+    return found
 
 
 def _ask_site(site: dict, ask_url: str, session: requests.Session) -> tuple[list[str], str]:
@@ -134,6 +177,10 @@ def _ask_site(site: dict, ask_url: str, session: requests.Session) -> tuple[list
         u = _unescape(m.group(0))
         if not SKIP_RE.search(u) and u not in links:
             links.append(u)
+    if not links:
+        # Không khớp tên miền nào đã biết -> có thể site/CDN vừa đổi. Hỏi server
+        # từng url xem cái nào thật sự là video.
+        links = _sniff_video_urls(text, session)
     title = ""
     mt = re.search(r"<h3[^>]*>([^<]{1,200})</h3>", text) or \
         re.search(r'"(?:title|desc)"\s*:\s*"([^"]{1,200})"', text)
