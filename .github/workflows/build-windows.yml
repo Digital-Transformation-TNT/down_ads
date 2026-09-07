@@ -16,6 +16,13 @@ jobs:
   build:
     name: Build .exe (windows-latest)
     runs-on: windows-latest
+    # Console Windows mặc định dùng bảng mã cp1252. Các spec ở đây in log tiếng
+    # Việt có dấu ("nhúng Chromium từ …") -> PyInstaller chết giữa chừng với
+    # UnicodeEncodeError, dù bản thân việc đóng gói không sai gì. Ép UTF-8 cho
+    # cả job thay vì sửa chữ trong spec.
+    env:
+      PYTHONIOENCODING: "utf-8"
+      PYTHONUTF8: "1"
     steps:
       - uses: actions/checkout@v4
 
