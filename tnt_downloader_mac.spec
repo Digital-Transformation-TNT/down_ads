@@ -85,6 +85,7 @@ a = Analysis(
     datas=datas,
     hiddenimports=hiddenimports + [
         "tnt_license", "cryptography",
+        "tnt_track", "tnt_feedback",   # nhật ký sử dụng + thanh góp ý
         "core.engine", "core.extractors", "core.sniffer", "core.cookies", "core.utils",
         "requests",
     ],
