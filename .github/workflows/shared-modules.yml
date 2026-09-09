@@ -43,7 +43,7 @@ jobs:
           # tnt_license.py -> CẢNH BÁO (đã lệch sẵn từ trước; bật chặn ngay thì
           #                   CI đỏ cả ba repo vì lỗi cũ). Sau khi gộp xong ba
           #                   bản, chuyển nó xuống dòng BLOCKING là chặn luôn.
-          BLOCKING="tnt_track.py tnt_feedback.py"
+          BLOCKING="tnt_track.py tnt_feedback.py tests/test_encoding.py"
           WARNING="tnt_license.py"
 
           status=0
@@ -59,11 +59,12 @@ jobs:
             for p in $PEERS; do
               [ "$p" = "$SELF" ] && continue
               url="https://raw.githubusercontent.com/$ORG/$p/main/$f"
-              if ! curl -fsSL "$url" -o /tmp/peer_$f 2>/dev/null; then
+              tmp="/tmp/peer_$(echo "$f" | tr "/" "_")"
+              if ! curl -fsSL "$url" -o "$tmp" 2>/dev/null; then
                 echo "   • $p: không tải được (chưa có file / repo đổi sang private) — bỏ qua"
                 continue
               fi
-              theirs=$(sha256sum /tmp/peer_$f | cut -d' ' -f1)
+              theirs=$(sha256sum "$tmp" | cut -d' ' -f1)
               if [ "$mine" = "$theirs" ]; then
                 echo "   ✓ khớp $p"
                 continue
@@ -71,7 +72,7 @@ jobs:
 
               echo "   ✗ LỆCH so với $p (${theirs:0:12}…)"
               echo "     ---- khác biệt (bản $p  →  bản $SELF) ----"
-              diff -u "/tmp/peer_$f" "$f" | head -60 || true
+              diff -u "$tmp" "$f" | head -60 || true
 
               case " $BLOCKING " in
                 *" $f "*)
@@ -92,3 +93,16 @@ jobs:
             echo "KẾT LUẬN: các module dùng chung đã đồng bộ."
           fi
           exit $status
+
+  encoding:
+    name: Test chống lỗi mã hoá khi gọi ffmpeg
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Cài ffmpeg (cho phần chạy thật)
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends ffmpeg
+      - name: Chạy test
+        run: python tests/test_encoding.py

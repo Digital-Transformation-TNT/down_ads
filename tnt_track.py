@@ -489,8 +489,17 @@ def run_click(props: dict = None) -> int:
 
 
 def retry(event_name: str = "regenerate", props: dict = None) -> None:
-    """Bấm làm lại — CÙNG một việc, chỉ tăng số lần bấm."""
+    """Bấm làm lại / yêu cầu sửa — CÙNG một việc, chỉ tăng số lần bấm.
+
+    Chưa có việc nào thì MỞ việc mới, y như `run_click`. Có tool cho phép bắt
+    đầu thẳng bằng thao tác sửa (vd "sửa ảnh hàng loạt" của Listing) — nếu ở đây
+    lặng lẽ bỏ qua thì cả mẻ đó không được ghi nhận, mất trắng số liệu.
+    """
     try:
+        if not _S.task:
+            feature_open()
+        if _S.task and _S.task.get("closed"):
+            feature_open(_S.task["feature"], source="continue")
         if not _S.task:
             return
         with _S.lock:
