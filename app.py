@@ -127,10 +127,11 @@ class MainWindow(QMainWindow):
         self._rows: list[int] = []
         self._build_ui()
         self._load_cfg()
-        # Bắt đầu theo dõi MỘT VIỆC. Mỗi mẻ tải xong là một việc; bấm tải mẻ
-        # tiếp theo thì tnt_track tự mở việc mới.
+        # KHÔNG mở "việc" ở đây. Mở app rồi đóng luôn mà cũng tính một việc thì
+        # việc đó vĩnh viễn không có sản phẩm -> bị đếm là BỎ DỞ, kéo tụt "Tỷ lệ
+        # hoàn thành" bằng thứ không phải công việc. Việc chỉ mở khi người dùng
+        # THẬT SỰ bấm Tải: tnt_track.run_click() tự mở nếu chưa có việc nào.
         self._job_t0 = 0.0
-        tnt_track.feature_open()
 
     # ────────────────────────────── giao diện ──────────────────────────────
     def _build_ui(self):
