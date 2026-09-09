@@ -34,6 +34,13 @@ _NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
 
 
 # ───────────────────────────── ffmpeg ─────────────────────────────
+#
+# MỌI lời gọi ffmpeg/ffprobe bên dưới PHẢI có encoding="utf-8", errors="replace".
+# `text=True` không kèm encoding sẽ giải mã theo bảng mã hệ thống — trên Windows
+# là cp1252. Mà ffmpeg in LẠI TÊN FILE vào output, còn tên file thì đặt theo tiêu
+# đề video: tiêu đề có chữ Hán/tiếng Việt là ném UnicodeDecodeError. Lỗi đó rơi
+# vào `except` rồi hoá thành "file không phải video", nên tool VỨT BỎ file vừa
+# tải xong và chuyển sang nguồn khác — tải bao nhiêu nguồn cũng hỏng.
 _FFMPEG = None
 _FFPROBE = None
 
@@ -142,7 +149,9 @@ def _has_video_via_ffmpeg(path: str) -> bool:
     """
     try:
         p = subprocess.run([ffmpeg_path(), "-hide_banner", "-i", path],
-                           capture_output=True, text=True, creationflags=_NO_WINDOW)
+                           capture_output=True, text=True,
+                           encoding="utf-8", errors="replace",
+                           creationflags=_NO_WINDOW)
         return "Video:" in (p.stderr or "")
     except Exception:
         return False
@@ -168,7 +177,9 @@ def has_video_stream(path: str) -> bool:
         out = subprocess.run(
             [ff, "-v", "error", "-select_streams", "v:0",
              "-show_entries", "stream=codec_type", "-of", "csv=p=0", path],
-            capture_output=True, text=True, creationflags=_NO_WINDOW).stdout
+            capture_output=True, text=True,
+            encoding="utf-8", errors="replace",
+            creationflags=_NO_WINDOW).stdout
         return "video" in out
     except Exception:
         return False
@@ -183,7 +194,9 @@ def probe_duration(path: str) -> float:
         out = subprocess.run(
             [ff, "-v", "error", "-show_entries", "format=duration",
              "-of", "csv=p=0", path],
-            capture_output=True, text=True, creationflags=_NO_WINDOW).stdout.strip()
+            capture_output=True, text=True,
+            encoding="utf-8", errors="replace",
+            creationflags=_NO_WINDOW).stdout.strip()
         return float(out or 0)
     except Exception:
         return 0.0
@@ -192,7 +205,9 @@ def probe_duration(path: str) -> float:
 def run_ffmpeg(args: list[str]) -> None:
     """Chạy ffmpeg, ném lỗi kèm stderr rút gọn nếu fail."""
     p = subprocess.run([ffmpeg_path(), "-y", "-hide_banner", "-loglevel", "error", *args],
-                       capture_output=True, text=True, creationflags=_NO_WINDOW)
+                       capture_output=True, text=True,
+                       encoding="utf-8", errors="replace",
+                       creationflags=_NO_WINDOW)
     if p.returncode != 0:
         raise RuntimeError(f"ffmpeg lỗi: {(p.stderr or '').strip()[:200]}")
 
